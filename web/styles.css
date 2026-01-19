@@ -1,0 +1,1034 @@
+/* ==========================================
+   ConsensusVault - 统一样式文件
+   ========================================== */
+
+/* ===== 1. CSS 变量定义 ===== */
+:root {
+    /*  风格配色 */
+    --bg: #0b0c11;
+    --surface: #141826;
+    --surface-2: #1d2232;
+    --border: #2f3547;
+    --text: #f6f7ff;
+    --text-muted: #c7ccda;
+    --accent: #ff7a1a;
+    --accent-2: #7c5cff;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --shadow: rgba(0, 0, 0, 0.35);
+
+    /* 尺寸与动画 */
+    --radius: 12px;
+    --radius-sm: 8px;
+    --transition: all 0.3s ease;
+}
+
+/* ===== 2. 全局重置与基础样式 ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: radial-gradient(1200px 600px at 20% -10%, rgba(124, 92, 255, 0.15), transparent),
+        radial-gradient(1000px 500px at 80% 10%, rgba(255, 122, 26, 0.15), transparent),
+        var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", sans-serif;
+    letter-spacing: 0.02em;
+    line-height: 1.6;
+    min-height: 100vh;
+    padding-bottom: 20px;
+
+
+
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* ===== 3. 排版样式 ===== */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.title,
+.stat-value,
+.vault-name,
+.tab,
+.nav {
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.subtitle,
+.description,
+p,
+.text-muted,
+.info-text {
+    font-weight: 500;
+    letter-spacing: 0.03em;
+}
+
+
+
+/* ===== 4. 导航栏 ===== */
+#app {
+    min-height: 100vh;
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+}
+
+.nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: rgba(19, 23, 34, 0.82);
+    backdrop-filter: saturate(140%) blur(10px);
+    border-bottom: 1px solid var(--border);
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+}
+
+.logo-mark {
+    display: inline-flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #111;
+    box-shadow: 0 6px 24px rgba(124, 92, 255, 0.35);
+}
+
+.logo-text {
+    font-size: 25px;
+    text-transform: none;
+    letter-spacing: 0.09em;
+}
+
+.logo-badge {
+    font-size: 12px;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+}
+
+.nav-tabs {
+    display: flex;
+    gap: 8px;
+}
+
+.tab {
+    padding: 8px 12px;
+    border-radius: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.tab.active,
+.tab:hover {
+    color: var(--text);
+    background: var(--surface-2);
+}
+
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 搜索栏 */
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.search-bar i {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.search-bar input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    width: 200px;
+}
+
+.search-bar input::placeholder {
+    color: var(--text-muted);
+}
+
+/* 链信息和钱包信息 */
+.chain-info,
+.wallet-info {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.chain-info:hover {
+    background: #222739;
+}
+
+.balance {
+    color: var(--success);
+}
+
+/* ===== 5. 按钮样式 ===== */
+.btn {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px var(--shadow);
+}
+
+.btn-primary,
+.btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #111;
+    border-color: transparent;
+}
+
+.btn-primary:hover {
+    box-shadow: 0 6px 20px rgba(255, 122, 26, 0.3);
+}
+
+.btn-secondary {
+    background: var(--surface-2);
+    color: var(--text);
+}
+
+.btn-outline,
+.btn.ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+}
+
+.btn.ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.btn-large {
+    width: 100%;
+    padding: 14px 20px;
+    font-size: 16px;
+    justify-content: center;
+}
+
+.btn-block {
+    width: 100%;
+}
+
+/* ===== 6. 控件区与过滤器 ===== */
+.controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    gap: 12px;
+}
+
+.filters {
+    display: flex;
+    gap: 8px;
+}
+
+.pill {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.pill.active,
+.pill:hover {
+    color: var(--text);
+    border-color: #343a4e;
+}
+
+.sort-chain {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.chains {
+    display: flex;
+    gap: 8px;
+}
+
+.chain {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.chain.active,
+.chain:hover {
+    color: var(--text);
+    border-color: #343a4e;
+}
+
+/* ===== 7. 视图与区块 ===== */
+.views-container {
+    padding: 40px 20px;
+}
+
+.view {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.view.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.section {
+    background: rgba(20, 24, 38, 0.6);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 28px var(--shadow);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+/* ===== 8. 表单样式 ===== */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    color: var(--text);
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.input-large,
+.input,
+input[type="text"],
+input[type="number"] {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s;
+}
+
+.input-large:focus,
+input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255, 122, 26, 0.1);
+}
+
+.select-sort,
+.select-small,
+select {
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.select-sort:hover {
+    border-color: var(--accent);
+    background: #1d2640;
+}
+
+select option {
+    background: var(--surface);
+    color: var(--text);
+}
+
+/* ===== 9. 金库卡片 ===== */
+.vaults-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.vault-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+}
+
+.vault-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(255, 122, 26, 0.15);
+    transform: translateY(-4px);
+}
+
+.vault-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.vault-symbol {
+    background: var(--surface-2);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.vault-address {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.vault-status,
+.status-badge {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.status-active {
+    background: rgba(255, 122, 26, 0.12);
+    color: var(--accent);
+}
+
+.status-consensus,
+.status-unlocked {
+    background: rgba(34, 197, 94, 0.12);
+    color: var(--success);
+}
+
+.vault-body {
+    flex: 1;
+    margin-bottom: 12px;
+}
+
+.vault-stat {
+    margin-bottom: 12px;
+}
+
+.vault-stat label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.vault-stat value {
+    display: block;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+/* 进度条 */
+.vault-progress,
+.progress-section {
+    margin-top: 12px;
+}
+
+.interaction-section {
+    margin-top: 40px;
+    /* 根据需要调整距离 */
+}
+
+
+.vault-progress label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--surface-2);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width 0.3s;
+}
+
+.progress-text,
+.progress-info {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.vault-footer {
+    display: flex;
+    gap: 8px;
+}
+
+/* ===== 10. 表格样式 ===== */
+.table-wrap {
+    overflow-x: auto;
+    padding: 0 20px 20px;
+    margin-bottom: 24px;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    background: rgba(20, 24, 38, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.table thead {
+    background: var(--surface-2);
+}
+
+.table th {
+    padding: 12px 16px;
+    text-align: left;
+    color: var(--text);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+.table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+}
+
+.table tr:last-child td {
+    border-bottom: none;
+}
+
+.table tbody tr:hover {
+    background: rgba(124, 92, 255, 0.06);
+}
+
+/* ===== 11. 模态框 ===== */
+.modal-overlay,
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 60px var(--shadow);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+}
+
+.modal-title {
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.modal-close:hover {
+    color: var(--text);
+}
+
+.modal-body {
+    color: var(--text);
+    margin-bottom: 20px;
+    line-height: 1.6;
+}
+
+.modal-footer {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+}
+
+/* ===== 12. 加载状态 ===== */
+.loading,
+.loading-content {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+}
+
+.loading i,
+.loading-content i {
+    font-size: 48px;
+    color: var(--accent);
+    margin-bottom: 16px;
+}
+
+.loading-spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-more {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    padding: 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* ===== 13. 空状态 ===== */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+
+.empty-state i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.empty-state p {
+    margin: 8px 0;
+}
+
+/* ===== 14. 页脚 ===== */
+.footer {
+    margin-top: 60px;
+    padding: 40px 0;
+    border-top: 1px solid var(--border);
+    background: rgba(19, 23, 34, 0.6);
+    text-align: center;
+}
+
+.footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 20px;
+}
+
+.footer-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.2s;
+}
+
+.footer-links a:hover {
+    color: var(--accent);
+}
+
+.footer-info {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 12px;
+    border-radius: 8px;
+    margin: 0 auto;
+    max-width: 600px;
+}
+
+.footer-warning {
+    padding: 20px;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 8px;
+    color: var(--danger);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+/* ===== 15. 统计卡片 ===== */
+.stats-section {
+    background: rgba(19, 23, 34, 0.75);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.stat-icon,
+.stat-value,
+.stat-label {
+    color: var(--text);
+}
+
+/* ===== 16. 功能卡片 ===== */
+.feature-card,
+.action-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.3s;
+
+
+}
+
+.feature-card:hover,
+.action-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(255, 122, 26, 0.1);
+}
+
+.feature-icon,
+.action-header i {
+    color: var(--accent-2);
+}
+
+.action-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+
+}
+
+.action-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.action-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* ===== 17. 信息卡片 ===== */
+.vault-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.info-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.info-card label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.info-card code {
+    display: block;
+    background: var(--surface-2);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent);
+    word-break: break-all;
+    font-family: monospace;
+}
+
+.info-card value {
+    display: block;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.info-card-wide {
+    grid-column: 1 / -1;
+}
+
+
+/* ===== 18. 响应式设计 ===== */
+@media (max-width: 960px) {
+    .nav {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .search-bar input {
+        width: 140px;
+    }
+}
+
+@media (max-width: 768px) {
+    .vaults-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vault-info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .action-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .activity-controls {
+        flex-direction: column;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sort-controls {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .search-bar {
+        width: 100%;
+        margin-left: 0;
+        margin-top: 10px;
+    }
+
+    .footer-links {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
+
+@media (max-width: 640px) {
+    .nav-left {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .nav-tabs {
+        display: none;
+    }
+
+    .controls {
+        padding: 12px;
+    }
+
+    .table-wrap {
+        padding: 0 10px 10px;
+    }
+}
+
+/* ===== 19. 工具类 ===== */
+.input-label.bright,
+.feature-title-bright {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.btn.primary.connected {
+    background: linear-gradient(135deg, #ff7a1a, #7c5cff);
+    cursor: pointer;
+    opacity: 1;
+}
+
+.btn.primary.connected:hover {
+    opacity: 0.9;
+}
+
+/* 网络选择 */
+.network-item {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.network-item:hover {
+    border-color: #343a4e;
+}
+
+.network-name {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.network-id {
+    color: var(--text-muted);
+    font-size: 12px;
+}

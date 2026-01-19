@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConsensusVault - DApp</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- 顶部导航 -->
+        <header class="nav">
+            <div class="nav-left">
+                <div class="logo">
+                    <span class="logo-mark">◎</span>
+                    <span class="logo-text">ConsensusVault</span>
+                    <span class="logo-badge">v1</span>
+                </div>
+                <nav class="nav-tabs">
+                    <a class="tab active" data-view="explore">
+                        <i class="fas fa-compass"></i> 探索
+                    </a>
+                    <a class="tab" data-view="vaults">
+                        <i class="fas fa-vault"></i> 我的金库
+                    </a>
+                </nav>
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="搜索金库或代币地址...">
+                    <button id="searchBtn" class="btn ghost">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="chain-info" id="networkInfo">
+                    <i class="fas fa-network-wired"></i>
+                    <span style="margin-right:15px; color:#666;">BSC 主网</span>
+                </div>
+                <button id="connectButton" class="btn primary">
+                    <i class="fas fa-wallet"></i>
+                    连接钱包
+                </button>
+            </div>
+        </header>
+
+        <!-- 视图容器 -->
+        <div class="views-container">
+            <!-- 视图：探索 -->
+            <main id="view-explore" class="view active">
+                <div class="container">
+                    <!-- 创建新金库 -->
+                    <section class="section create-section">
+                        <h2 class="section-title">
+                            <i class="fas fa-plus-circle"></i>
+                            创建新金库
+                        </h2>
+                        <div class="form-group">
+                            <label>代币合约地址</label>
+                            <input type="text" id="createTokenInput" placeholder="0x..." class="input-large">
+                            <small>为任何 ERC20 代币创建共识金库，系统将自动读取代币符号</small>
+                        </div>
+                        <div class="form-group">
+                            <label>初始存款数量</label>
+                            <input type="number" id="createDepositInput" placeholder="输入存款数量" class="input-large"
+                                min="0.01" step="0.01">
+                            <small>创建金库时必须存入的代币数量（必填，必须 > 0）</small>
+                        </div>
+                        <button id="createVaultBtn" class="btn btn-primary btn-large">
+                            <i class="fas fa-hammer"></i> 创建金库并存款
+                        </button>
+                    </section>
+
+                    <!-- 所有金库列表 -->
+                    <section class="section">
+                        <div class="section-header">
+                            <h2 class="section-title">
+                                <i class="fas fa-list"></i>
+                                所有金库
+                            </h2>
+                            <div class="sort-controls">
+                                <label>排序方式：</label>
+                                <select id="sortSelect" class="select-sort">
+                                    <option value="newest">最新创建</option>
+                                    <option value="progress">共识进度最高</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="vaultsGrid" class="vaults-grid">
+                            <div class="loading">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                加载金库列表...
+                            </div>
+                        </div>
+                        <div id="loadingMore" class="loading-more" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            加载更多...
+                        </div>
+                    </section>
+                </div>
+            </main>
+
+            <!-- 视图：我的金库 -->
+            <main id="view-vaults" class="view">
+                <div class="container">
+                    <section class="section">
+                        <h2 class="section-title">
+                            <i class="fas fa-user"></i>
+                            我的金库
+                        </h2>
+
+                        <div id="userVaultsGrid" class="vaults-grid">
+                            <div class="empty-state">
+                                <i class="fas fa-inbox"></i>
+                                <p>未参与任何金库</p>
+                                <p class="text-muted">连接钱包或在"探索"中创建/参与金库</p>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <div class="footer-links">
+                <a href="#" target="_blank"><i class="fas fa-book"></i> 文档</a>
+                <a href="#" target="_blank"><i class="fab fa-github"></i> GitHub</a>
+                <a href="#" target="_blank"><i class="fab fa-twitter"></i> Twitter</a>
+            </div>
+            <div class="footer-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                风险提示：请勿投入超过承受范围的资金
+            </div>
+        </footer>
+    </div>
+
+    <!-- 加载动画 -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p id="loadingText">处理中...</p>
+        </div>
+    </div>
+
+    <!-- 通用模态框 -->
+    <div id="modalOverlay" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title"></h3>
+                <button class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script src="index.js"></script>
+</body>
+
+</html>

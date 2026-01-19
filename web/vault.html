@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>金库详情 - ConsensusVault</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- 顶部导航 -->
+        <header class="nav">
+            <div class="nav-left">
+                <button class="btn ghost" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="logo">
+                    <span class="logo-mark">◎</span>
+                    <span class="logo-text">ConsensusVault</span>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="chain-info" id="networkInfo">
+                    <i class="fas fa-network-wired"></i>
+                    <select id="networkSwitch" class="network-select"
+                        style="margin-right:10px; padding:5px; border-radius:4px;">
+                        <option value="56">BSC 主网</option>
+                        <option value="97">BSC 测试网</option>
+                    </select>
+                </div>
+                <button id="connectButton" class="btn primary">
+                    <i class="fas fa-wallet"></i>
+                    连接钱包
+                </button>
+            </div>
+        </header>
+
+        <!-- 主容器 -->
+        <div class="container vault-detail-container">
+            <!-- 金库头部信息 -->
+            <section class="vault-header-section">
+                <h1 id="vaultTitle" class="section-title">
+                    <i class="fas fa-vault"></i>
+                    金库详情
+                </h1>
+
+                <div class="vault-info-grid">
+                    <!-- 金库状态 -->
+                    <div class="info-card">
+                        <label>金库状态</label>
+                        <div>
+                            <span id="vaultStatus" class="status-badge">锁定中</span>
+                        </div>
+                    </div>
+
+                    <!-- 金库地址 -->
+                    <div class="info-card">
+                        <label>金库地址</label>
+                        <code id="vaultAddress">加载中...</code>
+                    </div>
+
+                    <!-- 总存款 -->
+                    <div class="info-card">
+                        <label>金库总存款</label>
+                        <value id="totalDeposits">0</value>
+                    </div>
+
+                    <!-- 本金库获得的捐赠 -->
+                    <div class="info-card">
+                        <label>本金库获得的捐赠</label>
+                        <value id="totalDonations">0</value>
+                    </div>
+
+                    <!-- 赞成解锁票数 -->
+                    <div class="info-card info-card-wide">
+                        <label>赞成解锁票数</label>
+                        <value id="yesVotes">0</value>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 共识进度 -->
+            <section class="progress-section">
+                <h2>解锁共识进度</h2>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="progressPercent">0%</span>
+                        <span id="progressText" class="text-muted">需要超过总票数的50%</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 用户交互区 -->
+            <section class="interaction-section">
+                <h2>我的操作</h2>
+
+                <div class="action-cards">
+                    <!-- 存款卡片 -->
+                    <div class="action-card">
+                        <div class="action-header">
+                            <i class="fas fa-money-bill"></i>
+                            <h3>存款</h3>
+                        </div>
+                        <div class="action-body">
+                            <input type="text" id="depositAmount" placeholder="输入存款金额" inputmode="decimal"
+                                class="input-large">
+                            <button id="depositBtn" class="btn btn-primary btn-block">
+                                <i class="fas fa-plus"></i> 存款
+                            </button>
+                            <small id="myDeposit" class="text-muted">我的存款: 0</small>
+                        </div>
+                    </div>
+
+                    <!-- 捐赠卡片 -->
+                    <div class="action-card">
+                        <div class="action-header">
+                            <i class="fas fa-gift"></i>
+                            <h3>捐赠</h3>
+                        </div>
+                        <div class="action-body">
+                            <input type="text" id="donateAmount" placeholder="输入捐赠金额" inputmode="decimal"
+                                class="input-large">
+                            <button id="donateBtn" class="btn btn-primary btn-block">
+                                <i class="fas fa-heart"></i> 捐赠
+                            </button>
+                            <small class="text-muted">赠按照按捐赠当下时间点金库参与人的存款占比分配</small>
+                        </div>
+                    </div>
+
+                    <!-- 投票卡片 -->
+                    <div class="action-card">
+                        <div class="action-header">
+                            <i class="fas fa-vote-yea"></i>
+                            <h3>投票</h3>
+                        </div>
+                        <div class="action-body">
+                            <p class="text-muted">投票将一次性消耗您的所有投票权</p>
+                            <button id="voteBtn" class="btn btn-primary btn-block">
+                                <i class="fas fa-hand-paper"></i> 投票赞成解锁
+                            </button>
+                            <small id="myVotes" class="text-muted">我的投票权: 0</small>
+                        </div>
+                    </div>
+
+                    <!-- 提现卡片 -->
+                    <div class="action-card">
+                        <div class="action-header">
+                            <i class="fas fa-coins"></i>
+                            <h3>提现</h3>
+                        </div>
+                        <div class="action-body">
+                            <p class="text-muted">金库解锁后才能提现本金和捐赠分红收益</p>
+                            <button id="withdrawBtn" class="btn btn-primary btn-block">
+                                <i class="fas fa-money-check"></i> 提现
+                            </button>
+                            <small id="myReward" class="text-muted"></small>
+                        </div>
+                    </div>
+
+
+
+                    <!-- 使用说明卡片 -->
+                    <div class="action-card"
+                        style="border: 3px solid #ff0000; background: #fff5f5; grid-column: 1 / -1;">
+                        <div class="action-body" style="padding: 24px; text-align: center;">
+                            <p
+                                style="font-size: 18px; font-weight: bold; color: #4caf50; margin: 0; text-transform: uppercase; letter-spacing: 1px;">
+                                💡 使用说明
+                            </p>
+                            <p
+                                style="font-size: 16px; font-weight: bold; color: #4caf50; margin: 12px 0 0 0; text-transform: uppercase; line-height: 1.6; letter-spacing: 0.5px;">
+                                存款获得权益 → 投票支持共识 → 解锁后提现本金+捐赠分红收益
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+        </div>
+        <!-- 页脚 -->
+        <footer class="footer">
+            <div class="footer-links">
+                <a href="#" target="_blank"><i class="fas fa-book"></i> 文档</a>
+                <a href="#" target="_blank"><i class="fab fa-github"></i> GitHub</a>
+                <a href="#" target="_blank"><i class="fab fa-twitter"></i> Twitter</a>
+            </div>
+            <div class="footer-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                风险提示：请勿投入超过承受范围的资金
+            </div>
+        </footer>
+    </div>
+
+    <!-- 加载动画 -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p id="loadingText">处理中...</p>
+        </div>
+    </div>
+
+    <!-- 通用模态框 -->
+    <div id="modalOverlay" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title"></h3>
+                <button class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script>
+        // ===== 测试模式配置 =====
+        const TEST_MODE = true;  // 开发时设为 true
+        const TEST_VAULT_ADDRESS = '0x'; // 部署后替换为真实地址
+    </script>
+    <script src="vault.js"></script>
+</body>
+
+</html>
