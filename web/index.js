@@ -14,8 +14,8 @@
 //     explorer: 'https://bscscan.com'
 // };
 
-// BSC测试网（Chain ID: 61）
 
+// BSC测试网（Chain ID: 61）
 const CONFIG = {
     chainId: '0x61',
     chainIdDec: 97,
@@ -66,16 +66,17 @@ class VaultManager {
 
     async getFactoryVaultCount() {
         try {
-            return await this.factoryContract.getVaultCount();
+            return await this.factoryContract.getVaultsCount();
         } catch (e) {
             console.error('获取金库数量失败:', e);
+            console.log('合约可用方法:', Object.keys(this.factoryContract.functions || {}));
             return 0;
         }
     }
 
     async getVaultAddress(index) {
         try {
-            return await this.factoryContract.allVaults(index);
+            return await this.factoryContract.vaults(index);
         } catch (e) {
             console.error(`获取第 ${index} 个金库失败:`, e);
             return null;
@@ -235,7 +236,6 @@ class VaultManager {
                 CONSENSUS_VAULT_ABI,
                 signer
             );
-
             // 获取代币地址和用户地址
             const tokenAddress = await vault.depositToken();
             const userAddress = await signer.getAddress();
@@ -370,38 +370,43 @@ class VaultManager {
     // 创建金库（新版本：必须同时存入代币，自动读取symbol）
     async createVault(tokenAddress, initialDeposit, signer) {
         try {
-            // 确保地址格式正确，避免ENS解析
+            // 确保地址格式正确
             const checksumAddress = ethers.utils.getAddress(tokenAddress);
             const factory = this.factoryContract.connect(signer);
 
-            // 先approve代币给factory
-            const tokenContract = new ethers.Contract(
-                checksumAddress,
-                ['function approve(address spender, uint256 amount) returns (bool)'],
-                signer
-            );
-            const approveTx = await tokenContract.approve(factory.address, initialDeposit);
-            await approveTx.wait();
-
-            // 调用createVaultAndDeposit（合约会自动读取代币symbol）
-            const tx = await factory.createVaultAndDeposit(
-                checksumAddress,
-                initialDeposit
-            );
+            // 调用 createVault （合约方法）
+            const tx = await factory.createVault(checksumAddress);
             const receipt = await tx.wait();
 
-            // 从event中提取新金库地址
+            // 从 event 中提取新金库地址
             let vaultAddress = null;
             if (receipt && receipt.events) {
                 const event = receipt.events.find(e => e.event === 'VaultCreated');
                 if (event && event.args) {
-                    vaultAddress = event.args.vault;
+                    vaultAddress = event.args.vaultAddress;
                 }
             }
 
-            // 如果没有从event获取到，尝试通过token查询
-            if (!vaultAddress || vaultAddress === ethers.constants.AddressZero) {
-                vaultAddress = await this.getVaultForToken(tokenAddress);
+            // 如果有初始存款，单独调用 deposit
+            if (vaultAddress && initialDeposit && initialDeposit > 0) {
+                const vault = new ethers.Contract(
+                    vaultAddress,
+                    CONSENSUS_VAULT_ABI,
+                    signer
+                );
+
+                // approve 代币给金库
+                const tokenContract = new ethers.Contract(
+                    checksumAddress,
+                    ['function approve(address spender, uint256 amount) returns (bool)'],
+                    signer
+                );
+                const approveTx = await tokenContract.approve(vaultAddress, initialDeposit);
+                await approveTx.wait();
+
+                // 存款
+                const depositTx = await vault.deposit(initialDeposit);
+                await depositTx.wait();
             }
 
             return { tx, receipt, vaultAddress };
@@ -418,15 +423,11 @@ async function init() {
         // 1. 加载 ABI
         await loadABIs();
 
-        // 2. 初始化 provider（硬编码为 BSC 主网）
+        // 2. 初始化 provider（使用测试网配置）
         if (typeof window.ethereum !== 'undefined') {
-            provider = new ethers.providers.Web3Provider(window.ethereum, {
-                chainId: 56,
-                name: 'bsc',
-                ensAddress: null
-            });
+            provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
         } else {
-            provider = new ethers.providers.JsonRpcProvider('https://bsc-dataseed.bnbchain.org');
+            provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
         }
 
         // 3. 初始化管理器
@@ -436,13 +437,17 @@ async function init() {
         setupEventListeners();
 
         // 5. 尝试自动连接钱包
-        try {
-            const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-            if (accounts && accounts.length > 0) {
-                await connectWallet();
+        if (typeof window.ethereum !== 'undefined') {
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts && accounts.length > 0) {
+                    await connectWallet();
+                }
+            } catch (e) {
+                console.warn('自动连接钱包失败:', e.message);
             }
-        } catch (e) {
-            // 无钱包或用户未授权
+        } else {
+            console.warn('未检测到钱包，使用只读模式');
         }
 
         // 6. 加载初始数据
@@ -482,11 +487,53 @@ async function loadABIs() {
 
 async function connectWallet() {
     try {
+        // 检查钱包是否存在
+        if (typeof window.ethereum === 'undefined') {
+            showModal('未安装钱包', '请先安装 MetaMask 或其他钱包');
+            return;
+        }
+
         const accounts = await window.ethereum.request({
             method: 'eth_requestAccounts'
         });
         walletAddress = accounts[0];
+
+        // 检查并切换到正确的网络
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: CONFIG.chainId }],
+            });
+        } catch (switchError) {
+            // 如果网络不存在，添加网络
+            if (switchError.code === 4902) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: CONFIG.chainId,
+                            chainName: 'BSC Testnet',
+                            nativeCurrency: {
+                                name: 'BNB',
+                                symbol: 'BNB',
+                                decimals: 18
+                            },
+                            rpcUrls: [CONFIG.rpcUrl],
+                            blockExplorerUrls: [CONFIG.explorer]
+                        }],
+                    });
+                } catch (addError) {
+                    throw new Error('添加网络失败: ' + addError.message);
+                }
+            } else {
+                throw switchError;
+            }
+        }
+
+        // 网络切换后，重新初始化 provider 和 signer
+        provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
         signer = provider.getSigner();
+        vaultManager = new VaultManager(VAULT_FACTORY_ADDRESS, provider);
 
         updateUI();
 

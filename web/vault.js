@@ -3,12 +3,12 @@
 // ============================================
 
 // ===== 配置 =====
-// 仅支持 BSC 主网（Chain ID: 56）
+// BSC测试网（Chain ID: 97）
 const CONFIG = {
-    chainId: '0x38',
-    chainIdDec: 56,
-    displayName: 'BSC主网',
-    explorer: 'https://bscscan.com'
+    chainId: '0x61',
+    chainIdDec: 97,
+    rpcUrl: 'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+    explorer: 'https://testnet.bscscan.com'
 };
 
 const VAULT_FACTORY_ADDRESS = '0x9669AcaA7e427A45e5e751bB790231f779B46Adc';
@@ -170,12 +170,7 @@ async function init() {
 
         // 3. 初始化 Provider
         if (typeof window.ethereum !== 'undefined') {
-            const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-            provider = new ethers.providers.Web3Provider(window.ethereum, {
-                chainId: 56,
-                name: 'bsc',
-                ensAddress: null
-            });
+            provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
             console.log('✓ Web3Provider 初始化完成');
 
             // 设置事件监听
@@ -195,7 +190,7 @@ async function init() {
             }
         } else {
             // 只读模式：使用公共 RPC
-            provider = new ethers.providers.JsonRpcProvider('https://bsc-dataseed.bnbchain.org');
+            provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
             console.log('⚠ 未检测到 MetaMask，使用只读模式');
         }
 
@@ -266,16 +261,45 @@ async function connectWallet() {
         walletAddress = accounts[0];
         console.log('✓ 钱包已连接:', walletAddress);
 
-        // 重新初始化 provider
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-        provider = new ethers.providers.Web3Provider(window.ethereum, {
-            chainId: parseInt(chainId, 16),
-            name: 'bsc',
-            ensAddress: null
-        });
+        // 检查并切换到正确的网络
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: CONFIG.chainId }],
+            });
+        } catch (switchError) {
+            // 如果网络不存在，添加网络
+            if (switchError.code === 4902) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: CONFIG.chainId,
+                            chainName: 'BSC Testnet',
+                            nativeCurrency: {
+                                name: 'BNB',
+                                symbol: 'BNB',
+                                decimals: 18
+                            },
+                            rpcUrls: [CONFIG.rpcUrl],
+                            blockExplorerUrls: [CONFIG.explorer]
+                        }],
+                    });
+                } catch (addError) {
+                    throw new Error('添加网络失败: ' + addError.message);
+                }
+            } else if (switchError.code !== 4001) {
+                // 4001 是用户取消，不抛出
+                throw switchError;
+            }
+        }
 
+        // 网络切换后，重新初始化 provider 和 signer
+        provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
         signer = provider.getSigner();
-        currentNetwork = parseInt(chainId, 16) === 56 ? 'mainnet' : 'testnet';
+
+        const network = await provider.getNetwork();
+        currentNetwork = network.chainId === 56 ? 'mainnet' : 'testnet';
 
         updateUI();
         await loadUserInfo();
