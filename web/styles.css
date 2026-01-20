@@ -973,15 +973,44 @@ select option {
 }
 
 @media (max-width: 640px) {
+    /* 顶部导航在手机上改为垂直排列 */
+    .nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
     .nav-left {
         width: 100%;
-        justify-content: space-between;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
     }
-    /* 小屏幕依然显示导航 tab，改为自动换行布局 */
+
+    /* 排列顺序：logo -> 搜索 -> tab */
+    .logo {
+        order: 1;
+    }
+
+    .search-bar {
+        order: 2;
+        width: 100%;
+        margin-top: 4px;
+    }
+
     .nav-tabs {
+        order: 3;
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
+    }
+
+    /* 网络信息 + 钱包在最后一行 */
+    .nav-right {
+        order: 4;
+        width: 100%;
+        justify-content: space-between;
     }
 
     .controls {
