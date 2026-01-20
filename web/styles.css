@@ -977,9 +977,11 @@ select option {
         width: 100%;
         justify-content: space-between;
     }
-
+    /* 小屏幕依然显示导航 tab，改为自动换行布局 */
     .nav-tabs {
-        display: none;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
     }
 
     .controls {
