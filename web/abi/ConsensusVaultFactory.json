@@ -30,6 +30,16 @@
                 "internalType": "address",
                 "name": "_depositToken",
                 "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_initialAmount",
+                "type": "uint256"
+            },
+            {
+                "internalType": "string",
+                "name": "_name",
+                "type": "string"
             }
         ],
         "name": "createVault",

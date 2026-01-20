@@ -25,7 +25,7 @@ const CONFIG = {
 
 
 // 工厂合约地址（部署后替换）
-const VAULT_FACTORY_ADDRESS = '0x9669AcaA7e427A45e5e751bB790231f779B46Adc';
+const VAULT_FACTORY_ADDRESS = '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98';
 
 // 导入 ABI
 let VAULT_FACTORY_ABI = [];
@@ -150,12 +150,21 @@ class VaultManager {
                 tokenSymbol = 'TOKEN';
             }
 
+            // 获取自定义金库名称
+            let vaultName = '';
+            try {
+                vaultName = await vault.name();
+            } catch (e) {
+                console.warn(`获取金库名称失败: ${e.message}`);
+            }
+
             return {
                 depositToken: depositTokenAddr,
                 totalDeposits: await vault.totalPrincipal(),
                 totalYesVotes: await vault.totalVoteWeight(),
                 consensusReached: await vault.consensusReached(),
-                tokenSymbol: tokenSymbol
+                tokenSymbol: tokenSymbol,
+                vaultName: vaultName || '' // 自定义名称，如果为空则前端会用 tokenSymbol
             };
         } catch (e) {
             console.error(`获取金库详情失败 ${vaultAddress}:`, e);
@@ -413,15 +422,28 @@ class VaultManager {
         }
     }
 
-    // 创建金库（新版本：必须同时存入代币，自动读取symbol）
-    async createVault(tokenAddress, initialDeposit, signer) {
+    // 创建金库（原子创建：创建 + 首笔存款）
+    async createVault(tokenAddress, initialDeposit, vaultName, signer) {
         try {
             // 确保地址格式正确
             const checksumAddress = ethers.utils.getAddress(tokenAddress);
             const factory = this.factoryContract.connect(signer);
 
-            // 调用 createVault （合约方法）
-            const tx = await factory.createVault(checksumAddress);
+            if (!initialDeposit || initialDeposit.lte(0)) {
+                throw new Error('初始存款数量必须 > 0');
+            }
+
+            // 先授权代币给工厂合约（由工厂转入金库）
+            const tokenContract = new ethers.Contract(
+                checksumAddress,
+                ['function approve(address spender, uint256 amount) returns (bool)'],
+                signer
+            );
+            const approveTx = await tokenContract.approve(this.factoryAddress, initialDeposit);
+            await approveTx.wait();
+
+            // 调用 createVault（原子创建 + 首笔存款），传入自定义名称（可为空字符串）
+            const tx = await factory.createVault(checksumAddress, initialDeposit, vaultName || '');
             const receipt = await tx.wait();
 
             // 从 event 中提取新金库地址
@@ -431,28 +453,6 @@ class VaultManager {
                 if (event && event.args) {
                     vaultAddress = event.args.vaultAddress;
                 }
-            }
-
-            // 如果有初始存款，单独调用 deposit
-            if (vaultAddress && initialDeposit && initialDeposit > 0) {
-                const vault = new ethers.Contract(
-                    vaultAddress,
-                    CONSENSUS_VAULT_ABI,
-                    signer
-                );
-
-                // approve 代币给金库
-                const tokenContract = new ethers.Contract(
-                    checksumAddress,
-                    ['function approve(address spender, uint256 amount) returns (bool)'],
-                    signer
-                );
-                const approveTx = await tokenContract.approve(vaultAddress, initialDeposit);
-                await approveTx.wait();
-
-                // 存款
-                const depositTx = await vault.deposit(initialDeposit);
-                await depositTx.wait();
             }
 
             return { tx, receipt, vaultAddress };
@@ -649,7 +649,8 @@ async function loadAllVaults() {
                         blockNumber: i,
                         totalDepositsFormatted: ethers.utils.formatEther(details.totalDeposits),
                         totalYesVotesFormatted: ethers.utils.formatEther(details.totalYesVotes),
-                        tokenSymbol: details.tokenSymbol || 'TOKEN'
+                        tokenSymbol: details.tokenSymbol || 'TOKEN',
+                        displayName: details.vaultName && details.vaultName.trim() ? details.vaultName : (details.tokenSymbol || 'TOKEN')
                     });
                 }
             } catch (err) {
@@ -694,7 +695,10 @@ async function loadUserVaults() {
                         address: vaultAddr,
                         depositAmount: ethers.utils.formatEther(principal),
                         consensusReached: details ? details.consensusReached : false,
-                        tokenSymbol: details ? details.tokenSymbol : 'TOKEN'
+                        tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
+                        displayName: details && details.vaultName && details.vaultName.trim()
+                            ? details.vaultName
+                            : (details ? details.tokenSymbol : 'TOKEN')
                     });
                 }
             }
@@ -747,7 +751,7 @@ function renderUserVaults() {
         const statusIcon = vault.consensusReached ? 'fa-unlock' : 'fa-lock';
         card.innerHTML = `
             <div class="card-header">
-                <h3>${vault.tokenSymbol || 'TOKEN'}</h3>
+                <h3>${vault.displayName || vault.tokenSymbol || 'TOKEN'}</h3>
                 <span class="status-badge ${statusClass}"><i class="fas ${statusIcon}"></i> ${status}</span>
             </div>
             <div class="card-body">
@@ -828,19 +832,50 @@ function setupEventListeners() {
             }
 
             try {
-                showLoading('创建金库中，请在钱包确认交易...');
+                // 先计算需要的初始存款数量（wei）
                 const depositWei = ethers.utils.parseEther(depositAmount);
-                const result = await vaultManager.createVault(tokenAddr, depositWei, signer);
+
+                // 在创建金库前，先检查代币余额是否足够，避免链上直接报 Insufficient balance
+                try {
+                    const tokenContract = new ethers.Contract(
+                        tokenAddr,
+                        ['function balanceOf(address owner) view returns (uint256)'],
+                        provider
+                    );
+                    const userBalance = await tokenContract.balanceOf(walletAddress);
+                    console.log('创建金库前余额检查: 余额 =', ethers.utils.formatEther(userBalance), '需要 =', ethers.utils.formatEther(depositWei));
+
+                    if (userBalance.lt(depositWei)) {
+                        showModal(
+                            '余额不足',
+                            `您的代币余额只有 ${ethers.utils.formatEther(userBalance)}，不足以作为初始存款 ${depositAmount}`
+                        );
+                        return;
+                    }
+                } catch (balanceError) {
+                    console.warn('检查代币余额失败，继续尝试创建金库:', balanceError);
+                }
+
+                showLoading('创建金库中，请在钱包确认交易...');
+                const result = await vaultManager.createVault(tokenAddr, depositWei, vaultName, signer);
 
                 hideLoading();
 
                 if (result.vaultAddress && result.vaultAddress !== ethers.constants.AddressZero) {
                     showModal('创建成功', `金库已创建！`);
+                    // 清空输入框
+                    document.getElementById('createVaultNameInput').value = '';
+                    document.getElementById('createTokenInput').value = '';
+                    document.getElementById('createDepositInput').value = '';
                     setTimeout(() => {
                         goToVaultDetail(result.vaultAddress);
                     }, 1500);
                 } else {
                     showModal('创建成功', '金库已创建，请稍后在列表中查看');
+                    // 清空输入框
+                    document.getElementById('createVaultNameInput').value = '';
+                    document.getElementById('createTokenInput').value = '';
+                    document.getElementById('createDepositInput').value = '';
                     // 刷新金库列表
                     setTimeout(() => {
                         init();

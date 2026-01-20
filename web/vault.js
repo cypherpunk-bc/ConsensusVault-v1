@@ -11,7 +11,7 @@ const CONFIG = {
     explorer: 'https://testnet.bscscan.com'
 };
 
-const VAULT_FACTORY_ADDRESS = '0x9669AcaA7e427A45e5e751bB790231f779B46Adc';
+const VAULT_FACTORY_ADDRESS = '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98';
 
 // ===== 全局状态 =====
 let provider, signer, walletAddress;
@@ -79,6 +79,12 @@ function isWalletAvailable() {
 function formatPrecise(num) {
     // 显示完整精度，移除尾部0
     return parseFloat(num.toFixed(18)).toString();
+}
+
+function formatTimestamp(tsSeconds) {
+    if (!tsSeconds || tsSeconds <= 0) return '未达成共识';
+    const date = new Date(tsSeconds * 1000);
+    return date.toLocaleString();
 }
 
 // 获取代币余额
@@ -401,29 +407,47 @@ async function loadVaultDetails() {
         const totalPrincipal = await vault.totalPrincipal();
         const totalVoteWeight = await vault.totalVoteWeight();
         const consensusReached = await vault.consensusReached();
+        const unlockAt = await vault.unlockAt();
+        const participantCount = await vault.participantCount();
 
         // 【状态监控】显示金库解锁状态
         console.log(`[状态监控] 当前金库解锁状态: ${consensusReached ? "🔓 已解锁" : "🔒 已锁定"}`);
 
-        // 读取存款代币符号并更新页面标题（仅使用 symbol）
+        // 读取金库名称和代币符号并更新页面标题
         try {
             const depositTokenAddr = await vault.depositToken();
-            const erc20 = new ethers.Contract(
-                depositTokenAddr,
-                ['function symbol() view returns (string)'],
-                provider
-            );
-            let tokenSymbol = '';
+
+            // 优先读取自定义名称
+            let vaultName = '';
             try {
-                tokenSymbol = await erc20.symbol();
-            } catch (e) { }
+                vaultName = await vault.name();
+            } catch (e) {
+                console.warn('读取金库名称失败:', e);
+            }
+
+            // 如果没有自定义名称，则读取代币符号
+            let displayName = vaultName && vaultName.trim() ? vaultName : '';
+            if (!displayName) {
+                try {
+                    const erc20 = new ethers.Contract(
+                        depositTokenAddr,
+                        ['function symbol() view returns (string)'],
+                        provider
+                    );
+                    displayName = await erc20.symbol();
+                } catch (e) {
+                    console.warn('读取代币符号失败:', e);
+                    displayName = depositTokenAddr.slice(0, 10) + '...';
+                }
+            }
+
             const titleEl = document.getElementById('vaultTitle');
             if (titleEl) {
                 const iconHTML = '<i class="fas fa-vault"></i>';
-                titleEl.innerHTML = `${iconHTML} ${tokenSymbol || depositTokenAddr} 金库详情`;
+                titleEl.innerHTML = `${iconHTML} ${displayName} 金库详情`;
             }
         } catch (e) {
-            console.warn('读取代币符号失败，保留默认标题', e);
+            console.warn('读取金库信息失败，保留默认标题', e);
         }
 
         const totalPrincipalNum = parseFloat(ethers.utils.formatEther(totalPrincipal));
@@ -434,10 +458,14 @@ async function loadVaultDetails() {
             ? 100
             : (totalPrincipalNum > 0 ? (totalVoteWeightNum / totalPrincipalNum * 100) : 0);
 
+        const nowSec = Math.floor(Date.now() / 1000);
+        const unlockAtNum = parseInt(unlockAt.toString());
+
         // 更新 UI - 确保所有元素都存在
         const elem = (id) => document.getElementById(id);
         if (elem('totalDeposits')) elem('totalDeposits').textContent = formatPrecise(totalPrincipalNum);
         if (elem('yesVotes')) elem('yesVotes').textContent = formatPrecise(totalVoteWeightNum);
+        if (elem('participantCount')) elem('participantCount').textContent = participantCount.toString();
         if (elem('progressPercent')) elem('progressPercent').textContent = progressPercent.toFixed(1) + '%';
         if (elem('progressFill')) elem('progressFill').style.width = Math.min(progressPercent, 100) + '%';
 
@@ -449,11 +477,26 @@ async function loadVaultDetails() {
                 : 'status-badge status-active';
         }
 
+        // 解锁时间显示
+        if (elem('unlockTime')) {
+            if (!consensusReached) {
+                elem('unlockTime').textContent = '未达成共识';
+            } else if (nowSec >= unlockAtNum) {
+                elem('unlockTime').textContent = `已解锁 (${formatTimestamp(unlockAtNum)})`;
+            } else {
+                const remainingSec = Math.max(unlockAtNum - nowSec, 0);
+                const remainingHours = Math.ceil(remainingSec / 3600);
+                elem('unlockTime').textContent = `${formatTimestamp(unlockAtNum)} (约 ${remainingHours} 小时后可提现)`;
+            }
+        }
+
         // 禁用/启用按钮根据状态
         if (elem('depositBtn')) elem('depositBtn').disabled = consensusReached;
         if (elem('voteBtn')) elem('voteBtn').disabled = consensusReached;
         if (elem('donateBtn')) elem('donateBtn').disabled = consensusReached;
-        if (elem('withdrawBtn')) elem('withdrawBtn').disabled = !consensusReached;
+        if (elem('withdrawBtn')) {
+            elem('withdrawBtn').disabled = !consensusReached || (unlockAtNum > 0 && nowSec < unlockAtNum);
+        }
 
         // 获取累计捐赠总额（从合约状态读取，而不是查询事件以避免 RPC 限制）
         try {
@@ -935,6 +978,14 @@ async function deposit(amount) {
             return;
         }
 
+        // 投票后不能再存款
+        const userInfo = await vault.userInfo(walletAddress);
+        if (userInfo.hasVoted) {
+            hideLoading();
+            showModal('已投票', '您已投票，不能再追加存款。如需继续参与，请使用其他地址。');
+            return;
+        }
+
         const depositTokenAddr = await vault.depositToken();
         console.log('✓ 存款代币地址:', depositTokenAddr);
 
@@ -1230,6 +1281,8 @@ async function withdraw() {
                 errorMsg = '您取消了交易';
             } else if (error.message.includes('Not unlocked')) {
                 errorMsg = '金库还没解锁，需要达成共识后才能提现本金和捐赠收益';
+            } else if (error.message.includes('Unlock time not reached')) {
+                errorMsg = '共识已达成，但尚未到解锁时间，请稍后再试';
             } else if (error.message.includes('execution reverted')) {
                 errorMsg = '合约拒绝了提现，请确认金库已解锁且您有存款';
             }
@@ -1258,21 +1311,32 @@ async function donate(amount) {
             return;
         }
 
-        showLoading('步骤1/2: 授权代币...');
         const depositTokenAddr = await vault.depositToken();
-
         console.log('✓ 捐赠代币地址:', depositTokenAddr);
 
         const depositToken = new ethers.Contract(
             depositTokenAddr,
-            ['function approve(address spender, uint256 amount) public returns (bool)'],
+            ['function approve(address spender, uint256 amount) public returns (bool)', 'function balanceOf(address owner) public view returns (uint256)'],
             signer
         );
 
         const amountWei = ethers.utils.parseEther(amount);
         console.log('✓ 捐赠金额:', amount, '(', amountWei.toString(), 'wei)');
 
-        // 授权
+        // 在授权前先检查余额
+        showLoading('检查账户余额...');
+        const userBalance = await depositToken.balanceOf(walletAddress);
+        console.log('✓ 钱包余额:', ethers.utils.formatEther(userBalance));
+
+        if (userBalance.lt(amountWei)) {
+            hideLoading();
+            showModal('余额不足', `您的余额只有 ${ethers.utils.formatEther(userBalance)}，不足以捐赠 ${amount}`);
+            console.log('[donate] 余额不足，终止流程');
+            return;
+        }
+
+        // 余额足够，开始授权
+        showLoading('步骤1/2: 授权代币...');
         console.log('发送授权交易...');
         const approveTx = await depositToken.approve(vaultAddress, amountWei);
         console.log('✓ 授权交易已发送:', approveTx.hash);
