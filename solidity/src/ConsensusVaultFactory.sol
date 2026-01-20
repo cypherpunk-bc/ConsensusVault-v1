@@ -45,7 +45,11 @@ contract ConsensusVaultFactory {
         vaultAddress = address(vault);
 
         // Transfer initial deposit to vault
-        IERC20(_depositToken).safeTransferFrom(msg.sender, vaultAddress, _initialAmount);
+        IERC20(_depositToken).safeTransferFrom(
+            msg.sender,
+            vaultAddress,
+            _initialAmount
+        );
 
         // Record initial deposit (no transfer inside)
         vault.creditInitialDeposit(msg.sender, _initialAmount);
