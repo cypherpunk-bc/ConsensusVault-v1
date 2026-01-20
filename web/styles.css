@@ -977,7 +977,8 @@ select option {
     .nav {
         flex-direction: column;
         align-items: stretch;
-        gap: 8px;
+        gap: 6px;
+        padding: 8px 12px;
     }
 
     .nav-left {
@@ -985,25 +986,36 @@ select option {
         display: flex;
         flex-direction: column;
         align-items: stretch;
-        gap: 8px;
+        gap: 6px;
     }
 
     /* 排列顺序：logo -> 搜索 -> tab */
     .logo {
         order: 1;
+        gap: 6px;
+    }
+
+    .logo-mark {
+        width: 18px;
+        height: 18px;
+    }
+
+    .logo-text {
+        font-size: 18px;
     }
 
     .search-bar {
         order: 2;
         width: 100%;
-        margin-top: 4px;
+        margin-top: 2px;
+        padding: 6px 10px;
     }
 
     .nav-tabs {
         order: 3;
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: 4px;
     }
 
     /* 网络信息 + 钱包在最后一行 */
@@ -1011,6 +1023,7 @@ select option {
         order: 4;
         width: 100%;
         justify-content: space-between;
+        gap: 6px;
     }
 
     .controls {
