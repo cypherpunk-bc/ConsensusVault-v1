@@ -63,18 +63,18 @@ function getWalletProvider() {
         console.log('✓ 检测到 EIP-1193 兼容钱包');
         return window.ethereum;
     }
-    
+
     // 检测 OKX 钱包的专用注入对象（旧版本可能使用）
     if (typeof window.okxwallet !== 'undefined') {
         console.log('✓ 检测到 OKX 钱包 (okxwallet)');
         return window.okxwallet;
     }
-    
+
     if (typeof window.okexchain !== 'undefined') {
         console.log('✓ 检测到 OKX 钱包 (okexchain)');
         return window.okexchain;
     }
-    
+
     console.warn('⚠ 未检测到任何钱包');
     return null;
 }
@@ -539,7 +539,7 @@ async function connectWallet() {
         console.log('=== 开始连接钱包 ===');
         console.log('当前域名:', window.location.origin);
         console.log('当前协议:', window.location.protocol);
-        
+
         // 检查钱包是否存在
         const walletProvider = getWalletProvider();
         if (!walletProvider) {
@@ -605,7 +605,7 @@ async function connectWallet() {
             code: error.code,
             stack: error.stack
         });
-        
+
         let errorMsg = '钱包连接失败';
         if (error.message) {
             if (error.message.includes('user rejected') || error.message.includes('User denied')) {
@@ -616,7 +616,7 @@ async function connectWallet() {
                 errorMsg = `连接失败: ${error.message}`;
             }
         }
-        
+
         showModal('连接失败', errorMsg);
     }
 }
@@ -943,7 +943,7 @@ function diagnoseWalletConnection() {
     console.log('当前域名:', window.location.origin);
     console.log('当前协议:', window.location.protocol);
     console.log('是否HTTPS:', window.location.protocol === 'https:');
-    
+
     const walletProvider = getWalletProvider();
     if (walletProvider) {
         console.log('✓ 检测到钱包提供者');
