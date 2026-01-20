@@ -16,6 +16,7 @@ const VAULT_FACTORY_ADDRESS = '0x9669AcaA7e427A45e5e751bB790231f779B46Adc';
 // ===== 全局状态 =====
 let provider, signer, walletAddress;
 let vaultAddress = null;
+let currentNetwork = 'testnet'; // 当前网络：'mainnet' 或 'testnet'
 let VAULT_FACTORY_ABI = [];
 let CONSENSUS_VAULT_ABI = [];
 
@@ -27,6 +28,52 @@ const ERC20_EXTENDED_ABI = [
     'function approve(address spender, uint256 amount) returns (bool)',
     'event Transfer(address indexed from, address indexed to, uint256 value)'
 ];
+
+// ===== 钱包检测函数 =====
+/**
+ * 检测并返回可用的钱包提供者
+ * 支持 MetaMask、OKX Wallet 等多种钱包
+ */
+function getWalletProvider() {
+    // 检测 MetaMask 和其他 EIP-1193 兼容钱包
+    if (typeof window.ethereum !== 'undefined') {
+        // 检查是否是 OKX 钱包（OKX 钱包也会注入 ethereum 对象）
+        if (window.ethereum.isOKX || window.ethereum.isOkxWallet) {
+            console.log('✓ 检测到 OKX 钱包');
+            return window.ethereum;
+        }
+        // 检查是否是 MetaMask
+        if (window.ethereum.isMetaMask) {
+            console.log('✓ 检测到 MetaMask 钱包');
+            return window.ethereum;
+        }
+        // 其他 EIP-1193 兼容钱包
+        console.log('✓ 检测到 EIP-1193 兼容钱包');
+        return window.ethereum;
+    }
+
+    // 检测 OKX 钱包的专用注入对象（旧版本可能使用）
+    if (typeof window.okxwallet !== 'undefined') {
+        console.log('✓ 检测到 OKX 钱包 (okxwallet)');
+        return window.okxwallet;
+    }
+
+    if (typeof window.okexchain !== 'undefined') {
+        console.log('✓ 检测到 OKX 钱包 (okexchain)');
+        return window.okexchain;
+    }
+
+    console.warn('⚠ 未检测到任何钱包');
+    return null;
+}
+
+/**
+ * 检查钱包是否可用
+ */
+function isWalletAvailable() {
+    const provider = getWalletProvider();
+    return provider !== null;
+}
 
 // ===== 辅助函数 =====
 function formatPrecise(num) {
@@ -169,16 +216,19 @@ async function init() {
         await loadABIs();
 
         // 3. 初始化 Provider
-        if (typeof window.ethereum !== 'undefined') {
-            provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+        const walletProvider = getWalletProvider();
+        if (walletProvider) {
+            provider = new ethers.providers.Web3Provider(walletProvider, 'any');
             console.log('✓ Web3Provider 初始化完成');
+            console.log('当前域名:', window.location.origin);
+            console.log('当前协议:', window.location.protocol);
 
             // 设置事件监听
             setupEventListeners();
 
             // 尝试自动连接钱包
             try {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                const accounts = await walletProvider.request({ method: 'eth_accounts' });
                 if (accounts && accounts.length > 0) {
                     walletAddress = accounts[0];
                     signer = provider.getSigner();
@@ -186,12 +236,12 @@ async function init() {
                     updateUI();
                 }
             } catch (e) {
-                console.log('用户未授权钱包');
+                console.log('用户未授权钱包:', e.message);
             }
         } else {
             // 只读模式：使用公共 RPC
             provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
-            console.log('⚠ 未检测到 MetaMask，使用只读模式');
+            console.log('⚠ 未检测到钱包，使用只读模式');
         }
 
         // 4. 加载金库详情和用户信息
@@ -241,16 +291,19 @@ async function loadABIs() {
 
 async function connectWallet() {
     console.log('=== 开始连接钱包 ===');
+    console.log('当前域名:', window.location.origin);
+    console.log('当前协议:', window.location.protocol);
 
-    if (!window.ethereum) {
-        showModal('没有找到钱包', '您需要先安装钱包插件');
+    const walletProvider = getWalletProvider();
+    if (!walletProvider) {
+        showModal('没有找到钱包', '请先安装 MetaMask 或 OKX 钱包插件');
         return;
     }
 
     try {
         showLoading('正在连接钱包...');
 
-        const accounts = await window.ethereum.request({
+        const accounts = await walletProvider.request({
             method: 'eth_requestAccounts'
         });
 
@@ -263,7 +316,7 @@ async function connectWallet() {
 
         // 检查并切换到正确的网络
         try {
-            await window.ethereum.request({
+            await walletProvider.request({
                 method: 'wallet_switchEthereumChain',
                 params: [{ chainId: CONFIG.chainId }],
             });
@@ -271,7 +324,7 @@ async function connectWallet() {
             // 如果网络不存在，添加网络
             if (switchError.code === 4902) {
                 try {
-                    await window.ethereum.request({
+                    await walletProvider.request({
                         method: 'wallet_addEthereumChain',
                         params: [{
                             chainId: CONFIG.chainId,
@@ -286,16 +339,18 @@ async function connectWallet() {
                         }],
                     });
                 } catch (addError) {
+                    console.error('添加网络失败:', addError);
                     throw new Error('添加网络失败: ' + addError.message);
                 }
             } else if (switchError.code !== 4001) {
                 // 4001 是用户取消，不抛出
+                console.error('切换网络失败:', switchError);
                 throw switchError;
             }
         }
 
         // 网络切换后，重新初始化 provider 和 signer
-        provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+        provider = new ethers.providers.Web3Provider(walletProvider, 'any');
         signer = provider.getSigner();
 
         const network = await provider.getNetwork();
@@ -308,8 +363,25 @@ async function connectWallet() {
         showModal('连接成功', `已连接到 ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`);
     } catch (error) {
         console.error('连接钱包失败:', error);
+        console.error('错误详情:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+        });
         hideLoading();
-        showModal('连接失败', '钱包连接失败，请确认 MetaMask 已解锁');
+
+        let errorMsg = '钱包连接失败';
+        if (error.message) {
+            if (error.message.includes('user rejected') || error.message.includes('User denied')) {
+                errorMsg = '您取消了连接请求';
+            } else if (error.message.includes('Please unlock')) {
+                errorMsg = '请先解锁您的钱包';
+            } else {
+                errorMsg = `连接失败: ${error.message}`;
+            }
+        }
+
+        showModal('连接失败', errorMsg);
     }
 }
 
@@ -743,13 +815,17 @@ function setupEventListeners() {
         });
     }
 
-    // MetaMask 事件监听
-    if (window.ethereum) {
-        window.ethereum.removeAllListeners('accountsChanged');
-        window.ethereum.removeAllListeners('chainChanged');
+    // 钱包事件监听
+    const walletProvider = getWalletProvider();
+    if (walletProvider) {
+        // 移除旧的事件监听器（如果存在）
+        if (walletProvider.removeAllListeners) {
+            walletProvider.removeAllListeners('accountsChanged');
+            walletProvider.removeAllListeners('chainChanged');
+        }
 
-        window.ethereum.on('accountsChanged', (accounts) => {
-            console.log('账户已切换');
+        walletProvider.on('accountsChanged', (accounts) => {
+            console.log('账户已切换:', accounts);
             if (accounts.length === 0) {
                 walletAddress = null;
                 signer = null;
@@ -759,7 +835,8 @@ function setupEventListeners() {
             }
         });
 
-        window.ethereum.on('chainChanged', () => {
+        walletProvider.on('chainChanged', () => {
+            console.log('网络已切换，重新加载页面');
             window.location.reload();
         });
     }
@@ -1238,9 +1315,40 @@ async function donate(amount) {
     }
 }
 
+// ===== 调试工具函数 =====
+/**
+ * 诊断钱包连接问题
+ */
+function diagnoseWalletConnection() {
+    console.log('=== 钱包连接诊断 ===');
+    console.log('当前域名:', window.location.origin);
+    console.log('当前协议:', window.location.protocol);
+    console.log('是否HTTPS:', window.location.protocol === 'https:');
+
+    const walletProvider = getWalletProvider();
+    if (walletProvider) {
+        console.log('✓ 检测到钱包提供者');
+        console.log('提供者类型:', {
+            isOKX: walletProvider.isOKX || walletProvider.isOkxWallet,
+            isMetaMask: walletProvider.isMetaMask,
+            hasRequest: typeof walletProvider.request === 'function',
+            hasOn: typeof walletProvider.on === 'function'
+        });
+    } else {
+        console.error('✗ 未检测到钱包提供者');
+        console.log('可用的窗口对象:', {
+            ethereum: typeof window.ethereum !== 'undefined',
+            okxwallet: typeof window.okxwallet !== 'undefined',
+            okexchain: typeof window.okexchain !== 'undefined'
+        });
+    }
+}
+
 // ===== 页面加载 =====
 window.addEventListener('load', () => {
     console.log('金库详情页加载...');
+    // 执行诊断
+    diagnoseWalletConnection();
     init();
 });
 
