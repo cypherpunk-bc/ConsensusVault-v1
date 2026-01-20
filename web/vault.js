@@ -831,7 +831,11 @@ function setupEventListeners() {
                 signer = null;
                 updateUI();
             } else if (accounts[0] !== walletAddress) {
-                connectWallet();
+                // 仅更新账户并刷新用户信息（不弹“连接成功”提示）
+                walletAddress = accounts[0];
+                signer = provider ? provider.getSigner() : null;
+                updateUI();
+                loadUserInfo();
             }
         });
 

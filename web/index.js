@@ -893,6 +893,45 @@ function setupEventListeners() {
             if (overlay) overlay.style.display = 'none';
         });
     }
+
+    // 钱包事件监听（账户/网络切换）
+    const walletProvider = getWalletProvider();
+    if (walletProvider) {
+        // 清理旧的监听器（如果钱包实现了 removeAllListeners）
+        if (typeof walletProvider.removeAllListeners === 'function') {
+            try {
+                walletProvider.removeAllListeners('accountsChanged');
+                walletProvider.removeAllListeners('chainChanged');
+            } catch (e) {
+                console.warn('移除钱包事件监听器失败:', e);
+            }
+        }
+
+        // 账户切换时，自动更新全局地址和按钮显示
+        walletProvider.on('accountsChanged', (accounts) => {
+            console.log('账户已切换:', accounts);
+            if (!accounts || accounts.length === 0) {
+                walletAddress = null;
+                signer = null;
+                userCache.participatedVaults = [];
+                updateUI();
+            } else {
+                walletAddress = accounts[0];
+                if (provider) {
+                    signer = provider.getSigner();
+                }
+                updateUI();
+                // 刷新“我的金库”列表
+                loadUserVaults();
+            }
+        });
+
+        // 网络切换时，简单刷新页面，确保使用正确链配置
+        walletProvider.on('chainChanged', () => {
+            console.log('网络已切换，重新加载首页');
+            window.location.reload();
+        });
+    }
 }
 
 function switchView(view) {
@@ -932,6 +971,67 @@ function showModal(title, message) {
             overlay.style.display = 'none';
         });
     }
+}
+
+// 当同一代币存在多个未解锁金库时，弹出选择列表
+function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
+    const overlay = document.getElementById('modalOverlay');
+    if (!overlay) return;
+
+    const titleEl = overlay.querySelector('.modal-title');
+    const bodyEl = overlay.querySelector('.modal-body');
+
+    if (titleEl) {
+        titleEl.textContent = `${tokenSymbol} 有多个活跃金库`;
+    }
+
+    if (bodyEl) {
+        const itemsHtml = activeVaults
+            .sort((a, b) => (b.blockNumber || 0) - (a.blockNumber || 0)) // 最新一期排在最上面
+            .map(vault => {
+                const totalDeposits = parseFloat(vault.totalDepositsFormatted || '0');
+                const totalYesVotes = parseFloat(vault.totalYesVotesFormatted || '0');
+                const progress = vault.consensusReached
+                    ? 100
+                    : (totalDeposits > 0 ? (totalYesVotes / totalDeposits * 100) : 0);
+                const shortAddr = `${vault.address.slice(0, 8)}...${vault.address.slice(-6)}`;
+
+                return `
+                    <div class="vault-select-item" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; background: #f8f9fb;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <div style="font-weight:600;">${vault.tokenSymbol || tokenSymbol}</div>
+                            <div style="font-size:12px; color:#666;">共识进度：${progress.toFixed(1)}%</div>
+                        </div>
+                        <div style="font-size:12px; color:#888; margin-bottom:6px;">金库地址：${shortAddr}</div>
+                        <button class="btn btn-small vault-select-btn" data-address="${vault.address}">
+                            <i class="fas fa-arrow-right"></i> 进入此金库
+                        </button>
+                    </div>
+                `;
+            })
+            .join('');
+
+        bodyEl.innerHTML = `
+            <p style="margin-bottom:10px; font-size:13px; color:#555;">
+                该代币当前有多个未解锁金库，请选择要进入的金库：
+            </p>
+            ${itemsHtml}
+        `;
+    }
+
+    overlay.style.display = 'block';
+
+    // 绑定每个按钮的点击事件
+    const buttons = overlay.querySelectorAll('.vault-select-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const addr = btn.getAttribute('data-address');
+            if (addr) {
+                overlay.style.display = 'none';
+                goToVaultDetail(addr);
+            }
+        });
+    });
 }
 
 // ===== 调试工具函数 =====
@@ -1157,11 +1257,16 @@ async function searchVault() {
             return;
         }
 
-        // 3. 优先找未解锁的金库（当前活跃期）
-        const activeVault = matchingVaults.find(v => !v.consensusReached);
+        // 3. 找出所有未解锁金库（当前活跃期）
+        const activeVaults = matchingVaults.filter(v => !v.consensusReached);
 
-        if (activeVault) {
-            goToVaultDetail(activeVault.address);
+        if (activeVaults.length === 1) {
+            // 只有一个活跃金库时，直接跳转
+            goToVaultDetail(activeVaults[0].address);
+        } else if (activeVaults.length > 1) {
+            // 存在多个活跃金库时，让用户选择
+            const tokenSymbol = matchingVaults[0].tokenSymbol || 'TOKEN';
+            showVaultSelectionModal(activeVaults, tokenSymbol);
         } else {
             // 所有金库都已解锁，提示用户可以创建新一期
             showModal('提示', `${matchingVaults[0].tokenSymbol} 的所有金库都已解锁，您可以创建新一期金库`);
