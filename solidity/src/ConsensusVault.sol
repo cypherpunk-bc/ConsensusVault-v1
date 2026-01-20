@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title ConsensusVault - 简化版（无 VToken）
@@ -25,18 +24,25 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * - 无二级市场交易
  * - 存款后不可转让权益
  */
-contract ConsensusVault is ReentrancyGuard, Ownable {
+contract ConsensusVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 private constant PRECISION = 1e12;
+    uint256 private constant UNLOCK_DELAY = 1 days;
 
     IERC20 public depositToken;
+    address public factory;
+    string public name; // 用户自定义的金库名称
 
     uint256 public totalPrincipal; // 总本金
     uint256 public accRewardPerShare; // 累积分红/本金
     uint256 public totalVoteWeight; // 已投票的权重
     uint256 public totalDonations; // 累计捐赠总额
     bool public consensusReached;
+    uint256 public unlockAt; // 达成共识后的解锁时间
+    uint256 public participantCount; // 当前本金 > 0 的参与人数
+
+    mapping(address => bool) private isParticipant;
 
     struct UserInfo {
         uint256 principal; // 用户本金
@@ -52,9 +58,16 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
     event ConsensusAchieved(uint256 totalVoteWeight);
     event Withdrawn(address indexed user, uint256 principal, uint256 reward);
 
-    constructor(address _depositToken) {
+    constructor(address _depositToken, string memory _name) {
         require(_depositToken != address(0), "Invalid deposit token");
         depositToken = IERC20(_depositToken);
+        factory = msg.sender;
+        name = _name;
+    }
+
+    modifier onlyFactory() {
+        require(msg.sender == factory, "Only factory");
+        _;
     }
 
     // ============ 存款 ============
@@ -63,25 +76,21 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
         _depositFor(msg.sender, _amount);
     }
 
-    function depositFor(
-        address _user,
-        uint256 _amount
-    ) external onlyOwner nonReentrant {
-        _depositFor(_user, _amount);
-    }
-
     function _depositFor(address _user, uint256 _amount) internal {
         require(!consensusReached, "Consensus reached, deposit closed");
         require(_amount > 0, "Amount must be > 0");
+        require(!userInfo[_user].hasVoted, "Already voted, cannot deposit");
+
+        uint256 prevPrincipal = userInfo[_user].principal;
 
         // 转入存款
         depositToken.safeTransferFrom(msg.sender, address(this), _amount);
 
         // 计算当前累积的待领取收益（追加存款前）
         uint256 pendingReward = 0;
-        if (userInfo[_user].principal > 0) {
+        if (prevPrincipal > 0) {
             pendingReward =
-                ((userInfo[_user].principal * accRewardPerShare) / PRECISION) -
+                ((prevPrincipal * accRewardPerShare) / PRECISION) -
                 userInfo[_user].rewardDebt;
         }
 
@@ -89,12 +98,51 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
         totalPrincipal += _amount;
 
         // 更新用户本金
-        userInfo[_user].principal += _amount;
+        uint256 newPrincipal = prevPrincipal + _amount;
+        userInfo[_user].principal = newPrincipal;
+
+        if (prevPrincipal == 0 && !isParticipant[_user]) {
+            isParticipant[_user] = true;
+            participantCount += 1;
+        }
 
         // 更新分红债务：新本金对应的债务 - 之前累积的待领取收益
         // 这样确保 pendingReward 计算时能保留之前的收益
         userInfo[_user].rewardDebt =
-            ((userInfo[_user].principal * accRewardPerShare) / PRECISION) -
+            ((newPrincipal * accRewardPerShare) / PRECISION) -
+            pendingReward;
+
+        emit Deposited(_user, _amount);
+    }
+
+    // 工厂调用：首笔存款记账（不转账）
+    function creditInitialDeposit(
+        address _user,
+        uint256 _amount
+    ) external onlyFactory nonReentrant {
+        require(!consensusReached, "Consensus reached, deposit closed");
+        require(_amount > 0, "Amount must be > 0");
+        require(!userInfo[_user].hasVoted, "Already voted, cannot deposit");
+
+        uint256 prevPrincipal = userInfo[_user].principal;
+        uint256 pendingReward = 0;
+        if (prevPrincipal > 0) {
+            pendingReward =
+                ((prevPrincipal * accRewardPerShare) / PRECISION) -
+                userInfo[_user].rewardDebt;
+        }
+
+        totalPrincipal += _amount;
+        uint256 newPrincipal = prevPrincipal + _amount;
+        userInfo[_user].principal = newPrincipal;
+
+        if (prevPrincipal == 0 && !isParticipant[_user]) {
+            isParticipant[_user] = true;
+            participantCount += 1;
+        }
+
+        userInfo[_user].rewardDebt =
+            ((newPrincipal * accRewardPerShare) / PRECISION) -
             pendingReward;
 
         emit Deposited(_user, _amount);
@@ -118,6 +166,7 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
         // 共识检查（超过 50% 投票）
         if (totalVoteWeight * 2 > totalPrincipal) {
             consensusReached = true;
+            unlockAt = block.timestamp + UNLOCK_DELAY;
             emit ConsensusAchieved(totalVoteWeight);
         }
 
@@ -146,6 +195,7 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
 
     function withdrawAll() external nonReentrant {
         require(consensusReached, "Consensus not reached, cannot withdraw");
+        require(block.timestamp >= unlockAt, "Unlock time not reached");
 
         uint256 userPrincipal = userInfo[msg.sender].principal;
         require(userPrincipal > 0, "Nothing to withdraw");
@@ -160,6 +210,10 @@ contract ConsensusVault is ReentrancyGuard, Ownable {
         totalPrincipal -= userPrincipal;
 
         // 清零用户数据
+        if (isParticipant[msg.sender]) {
+            isParticipant[msg.sender] = false;
+            participantCount -= 1;
+        }
         userInfo[msg.sender].principal = 0;
         userInfo[msg.sender].rewardDebt = 0;
 
