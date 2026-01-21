@@ -415,32 +415,35 @@ async function loadVaultDetails() {
 
         // 读取金库名称和代币符号并更新页面标题
         let depositTokenAddr = '';
+        let vaultName = '';
+        let tokenSymbol = 'TOKEN';
         try {
             depositTokenAddr = await vault.depositToken();
 
-            // 优先读取自定义名称
-            let vaultName = '';
+            // 读取自定义金库名称
             try {
                 vaultName = await vault.name();
             } catch (e) {
                 console.warn('读取金库名称失败:', e);
             }
 
-            // 如果没有自定义名称，则读取代币符号
-            let displayName = vaultName && vaultName.trim() ? vaultName : '';
-            if (!displayName) {
-                try {
-                    const erc20 = new ethers.Contract(
-                        depositTokenAddr,
-                        ['function symbol() view returns (string)'],
-                        provider
-                    );
-                    displayName = await erc20.symbol();
-                } catch (e) {
-                    console.warn('读取代币符号失败:', e);
-                    displayName = depositTokenAddr.slice(0, 10) + '...';
-                }
+            // 读取代币符号
+            try {
+                const erc20 = new ethers.Contract(
+                    depositTokenAddr,
+                    ['function symbol() view returns (string)'],
+                    provider
+                );
+                tokenSymbol = await erc20.symbol();
+            } catch (e) {
+                console.warn('读取代币符号失败:', e);
+                tokenSymbol = 'TOKEN';
             }
+
+            // 格式化显示名称：金库名字 + 代币symbol
+            const displayName = vaultName && vaultName.trim() 
+                ? `${vaultName} ${tokenSymbol}` 
+                : tokenSymbol;
 
             const titleEl = document.getElementById('vaultTitle');
             if (titleEl) {

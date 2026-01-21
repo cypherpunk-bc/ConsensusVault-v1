@@ -650,7 +650,10 @@ async function loadAllVaults() {
                         totalDepositsFormatted: ethers.utils.formatEther(details.totalDeposits),
                         totalYesVotesFormatted: ethers.utils.formatEther(details.totalYesVotes),
                         tokenSymbol: details.tokenSymbol || 'TOKEN',
-                        displayName: details.vaultName && details.vaultName.trim() ? details.vaultName : (details.tokenSymbol || 'TOKEN')
+                        vaultName: details.vaultName || '',
+                        displayName: details.vaultName && details.vaultName.trim()
+                            ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
+                            : (details.tokenSymbol || 'TOKEN')
                     });
                 }
             } catch (err) {
@@ -696,8 +699,9 @@ async function loadUserVaults() {
                         depositAmount: ethers.utils.formatEther(principal),
                         consensusReached: details ? details.consensusReached : false,
                         tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
+                        vaultName: details ? (details.vaultName || '') : '',
                         displayName: details && details.vaultName && details.vaultName.trim()
-                            ? details.vaultName
+                            ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
                             : (details ? details.tokenSymbol : 'TOKEN')
                     });
                 }
@@ -749,9 +753,14 @@ function renderUserVaults() {
         const status = vault.consensusReached ? '已解锁' : '锁定中';
         const statusClass = vault.consensusReached ? 'status-unlocked' : 'status-active';
         const statusIcon = vault.consensusReached ? 'fa-unlock' : 'fa-lock';
+        // 格式化显示名称：金库名字 + 代币symbol
+        const displayTitle = vault.vaultName && vault.vaultName.trim()
+            ? `${vault.vaultName} ${vault.tokenSymbol || 'TOKEN'}`
+            : (vault.displayName || vault.tokenSymbol || 'TOKEN');
+
         card.innerHTML = `
             <div class="card-header">
-                <h3>${vault.displayName || vault.tokenSymbol || 'TOKEN'}</h3>
+                <h3>${displayTitle}</h3>
                 <span class="status-badge ${statusClass}"><i class="fas ${statusIcon}"></i> ${status}</span>
             </div>
             <div class="card-body">
@@ -1221,9 +1230,14 @@ function createVaultCard(vault) {
     const status = vault.consensusReached ? '已解锁' : '锁定中';
     const statusClass = vault.consensusReached ? 'status-unlocked' : 'status-active';
 
+    // 格式化显示名称：金库名字 + 代币symbol
+    const displayTitle = vault.vaultName && vault.vaultName.trim()
+        ? `${vault.vaultName} ${vault.tokenSymbol || 'TOKEN'}`
+        : (vault.tokenSymbol || 'VAULT');
+
     div.innerHTML = `
         <div class="card-header">
-            <h3>${vault.tokenSymbol || 'VAULT'}</h3>
+            <h3>${displayTitle}</h3>
             <span class="status-badge ${statusClass}">${status}</span>
         </div>
         <div class="card-body">
