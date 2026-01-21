@@ -1041,10 +1041,22 @@ function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
                     : (totalDeposits > 0 ? (totalYesVotes / totalDeposits * 100) : 0);
                 const shortAddr = `${vault.address.slice(0, 8)}...${vault.address.slice(-6)}`;
 
+                // 调试信息
+                console.log('金库选择弹窗 - 金库数据:', {
+                    address: vault.address,
+                    vaultName: vault.vaultName,
+                    tokenSymbol: vault.tokenSymbol
+                });
+
+                // 显示名称：金库名字 + 代币symbol，如果没有名字就只显示symbol
+                const displayTitle = vault.vaultName && vault.vaultName.trim()
+                    ? `${vault.vaultName} ${vault.tokenSymbol || tokenSymbol}`
+                    : (vault.tokenSymbol || tokenSymbol);
+
                 return `
                     <div class="vault-select-item" style="margin-bottom: 12px; padding: 10px; border-radius: 6px; background: #f8f9fb;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                            <div style="font-weight:600;">${vault.tokenSymbol || tokenSymbol}</div>
+                            <div style="font-weight:700; color:#1a1a1a; font-size:15px;">${displayTitle}</div>
                             <div style="font-size:12px; color:#666;">共识进度：${progress.toFixed(1)}%</div>
                         </div>
                         <div style="font-size:12px; color:#888; margin-bottom:6px;">金库地址：${shortAddr}</div>
