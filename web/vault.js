@@ -414,8 +414,9 @@ async function loadVaultDetails() {
         console.log(`[状态监控] 当前金库解锁状态: ${consensusReached ? "🔓 已解锁" : "🔒 已锁定"}`);
 
         // 读取金库名称和代币符号并更新页面标题
+        let depositTokenAddr = '';
         try {
-            const depositTokenAddr = await vault.depositToken();
+            depositTokenAddr = await vault.depositToken();
 
             // 优先读取自定义名称
             let vaultName = '';
@@ -463,6 +464,11 @@ async function loadVaultDetails() {
 
         // 更新 UI - 确保所有元素都存在
         const elem = (id) => document.getElementById(id);
+        
+        // 显示代币地址（在elem函数定义之后）
+        if (depositTokenAddr && elem('tokenAddress')) {
+            elem('tokenAddress').textContent = depositTokenAddr;
+        }
         if (elem('totalDeposits')) elem('totalDeposits').textContent = formatPrecise(totalPrincipalNum);
         if (elem('yesVotes')) elem('yesVotes').textContent = formatPrecise(totalVoteWeightNum);
         if (elem('participantCount')) elem('participantCount').textContent = participantCount.toString();

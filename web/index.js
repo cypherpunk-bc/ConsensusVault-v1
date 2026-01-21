@@ -813,6 +813,7 @@ function setupEventListeners() {
                 showModal('未连接钱包', '请先连接钱包');
                 return;
             }
+            const vaultName = document.getElementById('createVaultNameInput')?.value.trim() || '';
             const tokenAddr = document.getElementById('createTokenInput').value.trim();
             const depositAmount = document.getElementById('createDepositInput')?.value.trim() || '';
 

@@ -48,48 +48,51 @@
                 </h1>
 
                 <div class="vault-info-grid">
-                    <!-- 金库状态 -->
-                    <div class="info-card">
+                    <!-- 1. 金库状态（单独一排） -->
+                    <div class="info-card info-card-wide">
                         <label>金库状态</label>
                         <div>
                             <span id="vaultStatus" class="status-badge">锁定中</span>
                         </div>
                     </div>
 
-                    <!-- 金库地址 -->
+                    <!-- 2. 金库地址 代币地址（同一排） -->
                     <div class="info-card">
                         <label>金库地址</label>
                         <code id="vaultAddress">加载中...</code>
                     </div>
 
-                    <!-- 总存款 -->
+                    <div class="info-card">
+                        <label>代币地址</label>
+                        <code id="tokenAddress">加载中...</code>
+                    </div>
+
+                    <!-- 3. 金库总存款 本金库获得的捐赠（同一排） -->
                     <div class="info-card">
                         <label>金库总存款</label>
                         <value id="totalDeposits">0</value>
                     </div>
 
-                    <!-- 本金库获得的捐赠 -->
                     <div class="info-card">
                         <label>本金库获得的捐赠</label>
                         <value id="totalDonations">0</value>
                     </div>
 
-                    <!-- 赞成解锁票数 -->
-                    <div class="info-card info-card-wide">
-                        <label>赞成解锁票数</label>
-                        <value id="yesVotes">0</value>
-                    </div>
-
-                    <!-- 参与人数 -->
+                    <!-- 4. 参与人数 可提现时间（同一排） -->
                     <div class="info-card">
                         <label>参与人数</label>
                         <value id="participantCount">0</value>
                     </div>
 
-                    <!-- 解锁时间 -->
                     <div class="info-card">
                         <label>可提现时间</label>
                         <value id="unlockTime">未达成共识</value>
+                    </div>
+
+                    <!-- 5. 赞成解锁票数（单独一排） -->
+                    <div class="info-card info-card-wide">
+                        <label>赞成解锁票数</label>
+                        <value id="yesVotes">0</value>
                     </div>
                 </div>
             </section>
