@@ -43,39 +43,84 @@ const ERC20_EXTENDED_ABI = [
 
 // ===== 钱包检测函数 =====
 /**
+ * 钱包检测配置（按优先级排序）
+ */
+const WALLET_PRIORITY = [
+    {
+        name: 'OKX (okxwallet)',
+        check: () => typeof window.okxwallet !== 'undefined',
+        getProvider: () => window.okxwallet
+    },
+    {
+        name: 'OKX (okexchain)',
+        check: () => typeof window.okexchain !== 'undefined',
+        getProvider: () => window.okexchain
+    },
+    {
+        name: 'OKX',
+        check: () => window.ethereum?.isOKX || window.ethereum?.isOkxWallet,
+        getProvider: () => window.ethereum
+    },
+    {
+        name: 'Binance Chain Wallet',
+        check: () => typeof window.BinanceChain !== 'undefined',
+        getProvider: () => window.BinanceChain
+    },
+    {
+        name: 'Binance',
+        check: () => window.ethereum?.isBinance || window.ethereum?.isBinanceWallet,
+        getProvider: () => window.ethereum
+    },
+    {
+        name: 'MetaMask',
+        check: () => window.ethereum?.isMetaMask,
+        getProvider: () => window.ethereum
+    },
+    {
+        name: 'Rabby',
+        check: () => window.ethereum?.isRabby,
+        getProvider: () => window.ethereum
+    },
+    {
+        name: 'Generic EIP-1193',
+        check: () => typeof window.ethereum !== 'undefined',
+        getProvider: () => window.ethereum
+    },
+];
+
+// 缓存钱包提供者，避免重复检测和日志
+let cachedWalletProvider = null;
+let cachedWalletName = null;
+
+/**
  * 检测并返回可用的钱包提供者
  * 支持 MetaMask、OKX Wallet 等多种钱包
+ * @param {boolean} forceRefresh - 是否强制刷新缓存（默认 false）
+ * @param {boolean} silent - 是否静默模式（不打印日志，默认 false）
  */
-function getWalletProvider() {
-    // 检测 MetaMask 和其他 EIP-1193 兼容钱包
-    if (typeof window.ethereum !== 'undefined') {
-        // 检查是否是 OKX 钱包（OKX 钱包也会注入 ethereum 对象）
-        if (window.ethereum.isOKX || window.ethereum.isOkxWallet) {
-            console.log('✓ 检测到 OKX 钱包');
-            return window.ethereum;
+function getWalletProvider(forceRefresh = false, silent = false) {
+    // 如果已有缓存且不强制刷新，直接返回
+    if (!forceRefresh && cachedWalletProvider !== null) {
+        return cachedWalletProvider;
+    }
+
+    // 重新检测
+    for (const wallet of WALLET_PRIORITY) {
+        if (wallet.check()) {
+            if (!silent) {
+                console.log(`✓ 检测到 ${wallet.name} 钱包`);
+            }
+            cachedWalletProvider = wallet.getProvider();
+            cachedWalletName = wallet.name;
+            return cachedWalletProvider;
         }
-        // 检查是否是 MetaMask
-        if (window.ethereum.isMetaMask) {
-            console.log('✓ 检测到 MetaMask 钱包');
-            return window.ethereum;
-        }
-        // 其他 EIP-1193 兼容钱包
-        console.log('✓ 检测到 EIP-1193 兼容钱包');
-        return window.ethereum;
     }
 
-    // 检测 OKX 钱包的专用注入对象（旧版本可能使用）
-    if (typeof window.okxwallet !== 'undefined') {
-        console.log('✓ 检测到 OKX 钱包 (okxwallet)');
-        return window.okxwallet;
+    if (!silent) {
+        console.warn('⚠ 未检测到任何钱包');
     }
-
-    if (typeof window.okexchain !== 'undefined') {
-        console.log('✓ 检测到 OKX 钱包 (okexchain)');
-        return window.okexchain;
-    }
-
-    console.warn('⚠ 未检测到任何钱包');
+    cachedWalletProvider = null;
+    cachedWalletName = null;
     return null;
 }
 
@@ -83,7 +128,8 @@ function getWalletProvider() {
  * 检查钱包是否可用
  */
 function isWalletAvailable() {
-    const provider = getWalletProvider();
+    // 使用静默模式，不打印日志
+    const provider = getWalletProvider(false, true);
     return provider !== null;
 }
 
@@ -572,7 +618,8 @@ async function init() {
         await loadABIs();
 
         // 2. 初始化 provider（使用测试网配置）
-        const walletProvider = getWalletProvider();
+        // 第一次调用时显示日志，后续使用缓存
+        const walletProvider = getWalletProvider(false, false);
         if (walletProvider) {
             provider = new ethers.providers.Web3Provider(walletProvider, 'any');
             console.log('当前域名:', window.location.origin);
@@ -642,8 +689,8 @@ async function connectWallet() {
         console.log('当前域名:', window.location.origin);
         console.log('当前协议:', window.location.protocol);
 
-        // 检查钱包是否存在
-        const walletProvider = getWalletProvider();
+        // 检查钱包是否存在（静默模式，不重复打印日志）
+        const walletProvider = getWalletProvider(false, true);
         if (!walletProvider) {
             showModal('未安装钱包', '请先安装钱包插件');
             return;
@@ -1046,8 +1093,8 @@ function setupEventListeners() {
         });
     }
 
-    // 钱包事件监听（账户/网络切换）
-    const walletProvider = getWalletProvider();
+    // 钱包事件监听（账户/网络切换）（静默模式，不重复打印日志）
+    const walletProvider = getWalletProvider(false, true);
     if (walletProvider) {
         // 清理旧的监听器（如果钱包实现了 removeAllListeners）
         if (typeof walletProvider.removeAllListeners === 'function') {
@@ -1208,7 +1255,8 @@ function diagnoseWalletConnection() {
     console.log('当前协议:', window.location.protocol);
     console.log('是否HTTPS:', window.location.protocol === 'https:');
 
-    const walletProvider = getWalletProvider();
+    // 诊断时强制刷新并显示日志
+    const walletProvider = getWalletProvider(true, false);
     if (walletProvider) {
         console.log('✓ 检测到钱包提供者');
         console.log('提供者类型:', {

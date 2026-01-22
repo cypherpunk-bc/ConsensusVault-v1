@@ -31,38 +31,62 @@ const ERC20_EXTENDED_ABI = [
 
 // ===== 钱包检测函数 =====
 /**
+ * 钱包检测配置（按优先级排序）
+ */
+const WALLET_PRIORITY = [
+    { 
+        name: 'OKX (okxwallet)', 
+        check: () => typeof window.okxwallet !== 'undefined',
+        getProvider: () => window.okxwallet
+    },
+    { 
+        name: 'OKX (okexchain)', 
+        check: () => typeof window.okexchain !== 'undefined',
+        getProvider: () => window.okexchain
+    },
+    { 
+        name: 'OKX', 
+        check: () => window.ethereum?.isOKX || window.ethereum?.isOkxWallet,
+        getProvider: () => window.ethereum
+    },
+    {
+        name: 'Binance Chain Wallet',
+        check: () => typeof window.BinanceChain !== 'undefined',
+        getProvider: () => window.BinanceChain
+    },
+    {
+        name: 'Binance',
+        check: () => window.ethereum?.isBinance || window.ethereum?.isBinanceWallet,
+        getProvider: () => window.ethereum
+    },
+    { 
+        name: 'MetaMask', 
+        check: () => window.ethereum?.isMetaMask,
+        getProvider: () => window.ethereum
+    },
+    { 
+        name: 'Rabby', 
+        check: () => window.ethereum?.isRabby,
+        getProvider: () => window.ethereum
+    },
+    { 
+        name: 'Generic EIP-1193', 
+        check: () => typeof window.ethereum !== 'undefined',
+        getProvider: () => window.ethereum
+    },
+];
+
+/**
  * 检测并返回可用的钱包提供者
  * 支持 MetaMask、OKX Wallet 等多种钱包
  */
 function getWalletProvider() {
-    // 检测 MetaMask 和其他 EIP-1193 兼容钱包
-    if (typeof window.ethereum !== 'undefined') {
-        // 检查是否是 OKX 钱包（OKX 钱包也会注入 ethereum 对象）
-        if (window.ethereum.isOKX || window.ethereum.isOkxWallet) {
-            console.log('✓ 检测到 OKX 钱包');
-            return window.ethereum;
+    for (const wallet of WALLET_PRIORITY) {
+        if (wallet.check()) {
+            console.log(`✓ 检测到 ${wallet.name} 钱包`);
+            return wallet.getProvider();
         }
-        // 检查是否是 MetaMask
-        if (window.ethereum.isMetaMask) {
-            console.log('✓ 检测到 MetaMask 钱包');
-            return window.ethereum;
-        }
-        // 其他 EIP-1193 兼容钱包
-        console.log('✓ 检测到 EIP-1193 兼容钱包');
-        return window.ethereum;
     }
-
-    // 检测 OKX 钱包的专用注入对象（旧版本可能使用）
-    if (typeof window.okxwallet !== 'undefined') {
-        console.log('✓ 检测到 OKX 钱包 (okxwallet)');
-        return window.okxwallet;
-    }
-
-    if (typeof window.okexchain !== 'undefined') {
-        console.log('✓ 检测到 OKX 钱包 (okexchain)');
-        return window.okexchain;
-    }
-
     console.warn('⚠ 未检测到任何钱包');
     return null;
 }

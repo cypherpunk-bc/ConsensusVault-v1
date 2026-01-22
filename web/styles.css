@@ -650,6 +650,9 @@ select option {
     padding: 24px;
     max-width: 400px;
     width: 90%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 20px 60px var(--shadow);
 }
 
@@ -686,6 +689,10 @@ select option {
     color: var(--text);
     margin-bottom: 20px;
     line-height: 1.6;
+    overflow-y: auto;
+    max-height: calc(90vh - 120px);
+    -webkit-overflow-scrolling: touch; /* iOS 平滑滚动 */
+    padding-right: 8px; /* 为滚动条留出空间 */
 }
 
 .modal-footer {
@@ -973,6 +980,15 @@ select option {
 }
 
 @media (max-width: 640px) {
+    .modal {
+        max-height: 85vh;
+        padding: 16px;
+    }
+    
+    .modal-body {
+        max-height: calc(85vh - 100px);
+    }
+    
     /* 顶部导航在手机上改为垂直排列 */
     .nav {
         flex-direction: column;
