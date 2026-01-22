@@ -97,6 +97,92 @@ const userCache = {
     userEvents: []          // 用户相关的所有事件
 };
 
+// ===== 代币小数位数处理工具 =====
+// 代币小数位数缓存（避免重复查询）
+const tokenDecimalsCache = new Map();
+
+/**
+ * 获取代币的小数位数
+ * @param {string} tokenAddress - 代币合约地址
+ * @param {ethers.Provider} provider - ethers provider
+ * @returns {Promise<number>} 代币小数位数，默认18
+ */
+async function getTokenDecimals(tokenAddress, provider) {
+    if (!tokenAddress || !provider) {
+        return 18; // 默认18位小数
+    }
+
+    const cacheKey = tokenAddress.toLowerCase();
+    if (tokenDecimalsCache.has(cacheKey)) {
+        return tokenDecimalsCache.get(cacheKey);
+    }
+
+    try {
+        const token = new ethers.Contract(
+            tokenAddress,
+            ERC20_EXTENDED_ABI,
+            provider
+        );
+        const decimals = await token.decimals();
+        tokenDecimalsCache.set(cacheKey, decimals);
+        return decimals;
+    } catch (e) {
+        console.warn(`获取代币 ${tokenAddress} 小数位数失败，使用默认值18:`, e.message);
+        tokenDecimalsCache.set(cacheKey, 18);
+        return 18;
+    }
+}
+
+/**
+ * 根据代币小数位数格式化代币数量
+ * @param {ethers.BigNumber} amount - 代币数量（wei格式）
+ * @param {number} decimals - 代币小数位数
+ * @returns {string} 格式化后的代币数量字符串
+ */
+function formatTokenAmount(amount, decimals) {
+    if (!amount || amount.isZero()) {
+        return '0';
+    }
+    const divisor = ethers.BigNumber.from(10).pow(decimals);
+    const quotient = amount.div(divisor);
+    const remainder = amount.mod(divisor);
+
+    if (remainder.isZero()) {
+        return quotient.toString();
+    }
+
+    // 处理小数部分
+    const remainderStr = remainder.toString().padStart(decimals, '0');
+    const trimmed = remainderStr.replace(/0+$/, '');
+    if (trimmed === '') {
+        return quotient.toString();
+    }
+
+    return `${quotient.toString()}.${trimmed}`;
+}
+
+/**
+ * 根据代币小数位数解析代币数量
+ * @param {string} amount - 代币数量字符串（如 "1.5"）
+ * @param {number} decimals - 代币小数位数
+ * @returns {ethers.BigNumber} 解析后的代币数量（wei格式）
+ */
+function parseTokenAmount(amount, decimals) {
+    if (!amount || amount === '0') {
+        return ethers.BigNumber.from(0);
+    }
+
+    const parts = amount.split('.');
+    const integerPart = parts[0] || '0';
+    const decimalPart = parts[1] || '';
+
+    // 确保小数部分不超过代币的小数位数
+    const trimmedDecimal = decimalPart.slice(0, decimals).padEnd(decimals, '0');
+    const fullAmount = integerPart + trimmedDecimal;
+
+    return ethers.BigNumber.from(fullAmount);
+}
+
 // ===== VaultManager 类 - 合约交互管理 =====
 class VaultManager {
     constructor(factoryAddress, provider) {
@@ -139,15 +225,18 @@ class VaultManager {
 
             const depositTokenAddr = await vault.depositToken();
             let tokenSymbol = 'TOKEN';
+            let tokenDecimals = 18; // 默认18位小数
 
-            // 获取 depositToken 的符号
+            // 获取 depositToken 的符号和小数位数
             try {
-                const tokenAbi = ['function symbol() view returns (string)'];
+                const tokenAbi = ['function symbol() view returns (string)', 'function decimals() view returns (uint8)'];
                 const depositToken = new ethers.Contract(depositTokenAddr, tokenAbi, this.provider);
                 tokenSymbol = await depositToken.symbol();
+                tokenDecimals = await depositToken.decimals();
             } catch (e) {
-                console.warn(`获取代币符号失败: ${e.message}`);
+                console.warn(`获取代币信息失败: ${e.message}`);
                 tokenSymbol = 'TOKEN';
+                tokenDecimals = 18;
             }
 
             // 获取自定义金库名称
@@ -164,6 +253,7 @@ class VaultManager {
                 totalYesVotes: await vault.totalVoteWeight(),
                 consensusReached: await vault.consensusReached(),
                 tokenSymbol: tokenSymbol,
+                tokenDecimals: tokenDecimals, // 添加小数位数
                 vaultName: vaultName || '' // 自定义名称，如果为空则前端会用 tokenSymbol
             };
         } catch (e) {
@@ -213,6 +303,9 @@ class VaultManager {
                 this.provider
             );
 
+            // 获取代币小数位数
+            const decimals = await getTokenDecimals(tokenAddress, this.provider);
+
             // 解析所有 Transfer 事件
             const transferEvents = receipt.logs
                 .filter(log => log.address.toLowerCase() === tokenAddress.toLowerCase())
@@ -242,20 +335,20 @@ class VaultManager {
                 console.log('✅ 链上转账验证成功 (事件匹配):');
                 console.log(`   From: ${matchedEvent.args.from}`);
                 console.log(`   To: ${matchedEvent.args.to}`);
-                console.log(`   Amount: ${ethers.utils.formatEther(matchedEvent.args.value)}`);
+                console.log(`   Amount: ${formatTokenAmount(matchedEvent.args.value, decimals)}`);
                 return true;
             } else {
                 console.warn('⚠️ 未找到匹配的 Transfer 事件，检查余额变化...');
                 console.log('期望的转账:', {
                     from: expectedFrom,
                     to: expectedTo,
-                    amount: ethers.utils.formatEther(expectedAmount)
+                    amount: formatTokenAmount(expectedAmount, decimals)
                 });
                 if (transferEvents.length > 0) {
                     console.log('实际的 Transfer 事件:', transferEvents.map(e => ({
                         from: e.args.from,
                         to: e.args.to,
-                        amount: ethers.utils.formatEther(e.args.value)
+                        amount: formatTokenAmount(e.args.value, decimals)
                     })));
                 }
 
@@ -266,13 +359,13 @@ class VaultManager {
 
                     if (actualChange.eq(expectedChange)) {
                         console.log('✅ 链上转账验证成功 (余额变化匹配):');
-                        console.log(`   预期变化: ${ethers.utils.formatEther(expectedChange)}`);
-                        console.log(`   实际变化: ${ethers.utils.formatEther(actualChange)}`);
+                        console.log(`   预期变化: ${formatTokenAmount(expectedChange, decimals)}`);
+                        console.log(`   实际变化: ${formatTokenAmount(actualChange, decimals)}`);
                         return true;
                     } else {
                         console.error('❌ 余额变化不匹配!');
-                        console.log(`   预期: ${ethers.utils.formatEther(expectedChange)}`);
-                        console.log(`   实际: ${ethers.utils.formatEther(actualChange)}`);
+                        console.log(`   预期: ${formatTokenAmount(expectedChange, decimals)}`);
+                        console.log(`   实际: ${formatTokenAmount(actualChange, decimals)}`);
                     }
                 }
 
@@ -294,15 +387,18 @@ class VaultManager {
             // 获取代币地址和用户地址
             const tokenAddress = await vault.depositToken();
             const userAddress = await signer.getAddress();
-            const amountWei = ethers.utils.parseEther(amount.toString());
+
+            // 获取代币小数位数
+            const decimals = await getTokenDecimals(tokenAddress, this.provider);
+            const amountWei = parseTokenAmount(amount.toString(), decimals);
 
             // 记录存款前的余额
             const userBalanceBefore = await this.getTokenBalance(tokenAddress, userAddress);
             const vaultBalanceBefore = await this.getTokenBalance(tokenAddress, vaultAddress);
 
             console.log('📊 存款前余额:');
-            console.log(`   用户: ${ethers.utils.formatEther(userBalanceBefore)}`);
-            console.log(`   金库: ${ethers.utils.formatEther(vaultBalanceBefore)}`);
+            console.log(`   用户: ${formatTokenAmount(userBalanceBefore, decimals)}`);
+            console.log(`   金库: ${formatTokenAmount(vaultBalanceBefore, decimals)}`);
 
             // 执行存款
             const tx = await vault.deposit(amountWei);
@@ -324,10 +420,10 @@ class VaultManager {
             );
 
             console.log('📊 存款后余额:');
-            console.log(`   用户: ${ethers.utils.formatEther(userBalanceAfter)}`);
-            console.log(`   金库: ${ethers.utils.formatEther(vaultBalanceAfter)}`);
-            console.log(`   用户变化: ${ethers.utils.formatEther(userBalanceBefore.sub(userBalanceAfter))}`);
-            console.log(`   金库变化: ${ethers.utils.formatEther(vaultBalanceAfter.sub(vaultBalanceBefore))}`);
+            console.log(`   用户: ${formatTokenAmount(userBalanceAfter, decimals)}`);
+            console.log(`   金库: ${formatTokenAmount(vaultBalanceAfter, decimals)}`);
+            console.log(`   用户变化: ${formatTokenAmount(userBalanceBefore.sub(userBalanceAfter), decimals)}`);
+            console.log(`   金库变化: ${formatTokenAmount(vaultBalanceAfter.sub(vaultBalanceBefore), decimals)}`);
 
             if (transferVerified) {
                 console.log('✅ 存款交易已在链上确认');
@@ -367,17 +463,23 @@ class VaultManager {
             const tokenAddress = await vault.depositToken();
             const userAddress = await signer.getAddress();
 
+            // 获取代币小数位数
+            const decimals = await getTokenDecimals(tokenAddress, this.provider);
+
             // 获取预期提现金额（手动计算 pendingReward）
             const userInfo = await vault.userInfo(userAddress);
             const accRewardPerShare = await vault.accRewardPerShare();
             const PRECISION = ethers.BigNumber.from('1000000000000'); // 1e12
             const pendingReward = userInfo.principal.mul(accRewardPerShare).div(PRECISION).sub(userInfo.rewardDebt);
+            const expectedAmount = userInfo.principal.add(pendingReward);
+
+            const userBalanceBefore = await this.getTokenBalance(tokenAddress, userAddress);
             const vaultBalanceBefore = await this.getTokenBalance(tokenAddress, vaultAddress);
 
             console.log('📊 提现前余额:');
-            console.log(`   用户: ${ethers.utils.formatEther(userBalanceBefore)}`);
-            console.log(`   金库: ${ethers.utils.formatEther(vaultBalanceBefore)}`);
-            console.log(`   预期提现: ${ethers.utils.formatEther(expectedAmount)} (本金 ${ethers.utils.formatEther(userInfo.principal)} + 收益 ${ethers.utils.formatEther(pendingReward)})`);
+            console.log(`   用户: ${formatTokenAmount(userBalanceBefore, decimals)}`);
+            console.log(`   金库: ${formatTokenAmount(vaultBalanceBefore, decimals)}`);
+            console.log(`   预期提现: ${formatTokenAmount(expectedAmount, decimals)} (本金 ${formatTokenAmount(userInfo.principal, decimals)} + 收益 ${formatTokenAmount(pendingReward, decimals)})`);
 
             // 执行提现
             const tx = await vault.withdrawAll();
@@ -397,8 +499,8 @@ class VaultManager {
                 vaultBalanceBefore,
                 vaultBalanceAfter
             );
-            console.log(`   用户变化: +${ethers.utils.formatEther(userBalanceAfter.sub(userBalanceBefore))}`);
-            console.log(`   金库变化: -${ethers.utils.formatEther(vaultBalanceBefore.sub(vaultBalanceAfter))}`);
+            console.log(`   用户变化: +${formatTokenAmount(userBalanceAfter.sub(userBalanceBefore), decimals)}`);
+            console.log(`   金库变化: -${formatTokenAmount(vaultBalanceBefore.sub(vaultBalanceAfter), decimals)}`);
 
             if (transferVerified) {
                 console.log('✅ 提现交易已在链上确认');
@@ -543,7 +645,7 @@ async function connectWallet() {
         // 检查钱包是否存在
         const walletProvider = getWalletProvider();
         if (!walletProvider) {
-            showModal('未安装钱包', '请先安装 MetaMask 或 OKX 钱包');
+            showModal('未安装钱包', '请先安装钱包插件');
             return;
         }
 
@@ -643,12 +745,13 @@ async function loadAllVaults() {
                 const vaultAddr = await vaultManager.getVaultAddress(i);
                 if (vaultAddr) {
                     const details = await vaultManager.getVaultDetails(vaultAddr);
+                    const decimals = details.tokenDecimals || 18;
                     allVaults.push({
                         address: vaultAddr,
                         ...details,
                         blockNumber: i,
-                        totalDepositsFormatted: ethers.utils.formatEther(details.totalDeposits),
-                        totalYesVotesFormatted: ethers.utils.formatEther(details.totalYesVotes),
+                        totalDepositsFormatted: formatTokenAmount(details.totalDeposits, decimals),
+                        totalYesVotesFormatted: formatTokenAmount(details.totalYesVotes, decimals),
                         tokenSymbol: details.tokenSymbol || 'TOKEN',
                         vaultName: details.vaultName || '',
                         displayName: details.vaultName && details.vaultName.trim()
@@ -694,9 +797,10 @@ async function loadUserVaults() {
                 const principal = userInfo ? userInfo.principal || userInfo[0] : null;
                 if (principal && principal.gt(0)) {
                     const details = await vaultManager.getVaultDetails(vaultAddr);
+                    const decimals = details ? (details.tokenDecimals || 18) : 18;
                     userCache.participatedVaults.push({
                         address: vaultAddr,
-                        depositAmount: ethers.utils.formatEther(principal),
+                        depositAmount: formatTokenAmount(principal, decimals),
                         consensusReached: details ? details.consensusReached : false,
                         tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
                         vaultName: details ? (details.vaultName || '') : '',
@@ -769,7 +873,7 @@ function renderUserVaults() {
                     <span class="value">${parseFloat(vault.depositAmount).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
                 </div>
                 <div class="info-row">
-                    <span class="label">金库地址</span>
+                    <span class="label">金库地址</span> 
                     <span class="value" style="font-family: monospace; font-size: 12px;">${vault.address.slice(0, 10)}...${vault.address.slice(-8)}</span>
                 </div>
             </div>
@@ -842,23 +946,26 @@ function setupEventListeners() {
             }
 
             try {
-                // 先计算需要的初始存款数量（wei）
-                const depositWei = ethers.utils.parseEther(depositAmount);
+                // 先获取代币小数位数
+                const tokenContract = new ethers.Contract(
+                    tokenAddr,
+                    ['function decimals() view returns (uint8)', 'function balanceOf(address owner) view returns (uint256)'],
+                    provider
+                );
+                const decimals = await tokenContract.decimals();
+
+                // 计算需要的初始存款数量（使用正确的小数位数）
+                const depositWei = parseTokenAmount(depositAmount, decimals);
 
                 // 在创建金库前，先检查代币余额是否足够，避免链上直接报 Insufficient balance
                 try {
-                    const tokenContract = new ethers.Contract(
-                        tokenAddr,
-                        ['function balanceOf(address owner) view returns (uint256)'],
-                        provider
-                    );
                     const userBalance = await tokenContract.balanceOf(walletAddress);
-                    console.log('创建金库前余额检查: 余额 =', ethers.utils.formatEther(userBalance), '需要 =', ethers.utils.formatEther(depositWei));
+                    console.log('创建金库前余额检查: 余额 =', formatTokenAmount(userBalance, decimals), '需要 =', formatTokenAmount(depositWei, decimals));
 
                     if (userBalance.lt(depositWei)) {
                         showModal(
                             '余额不足',
-                            `您的代币余额只有 ${ethers.utils.formatEther(userBalance)}，不足以作为初始存款 ${depositAmount}`
+                            `您的代币余额只有 ${formatTokenAmount(userBalance, decimals)}，不足以作为初始存款 ${depositAmount}`
                         );
                         return;
                     }
