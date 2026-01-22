@@ -787,29 +787,56 @@ async function loadAllVaults() {
         allVaults = [];
         const loadLimit = Math.min(count, 50);
 
+        console.log(`开始并行加载 ${loadLimit} 个金库...`);
+        const startTime = Date.now();
+
+        // 并行获取所有金库地址
+        const vaultAddressPromises = [];
         for (let i = 0; i < loadLimit; i++) {
-            try {
-                const vaultAddr = await vaultManager.getVaultAddress(i);
-                if (vaultAddr) {
-                    const details = await vaultManager.getVaultDetails(vaultAddr);
-                    const decimals = details.tokenDecimals || 18;
-                    allVaults.push({
-                        address: vaultAddr,
-                        ...details,
-                        blockNumber: i,
-                        totalDepositsFormatted: formatTokenAmount(details.totalDeposits, decimals),
-                        totalYesVotesFormatted: formatTokenAmount(details.totalYesVotes, decimals),
-                        tokenSymbol: details.tokenSymbol || 'TOKEN',
-                        vaultName: details.vaultName || '',
-                        displayName: details.vaultName && details.vaultName.trim()
-                            ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
-                            : (details.tokenSymbol || 'TOKEN')
-                    });
-                }
-            } catch (err) {
-                console.warn('加载金库失败:', err.message);
-            }
+            vaultAddressPromises.push(
+                vaultManager.getVaultAddress(i).then(addr => ({ index: i, address: addr }))
+                    .catch(err => {
+                        console.warn(`获取第 ${i} 个金库地址失败:`, err.message);
+                        return { index: i, address: null };
+                    })
+            );
         }
+
+        const vaultAddresses = await Promise.all(vaultAddressPromises);
+        console.log(`已获取 ${vaultAddresses.filter(v => v.address).length} 个金库地址`);
+
+        // 并行获取所有金库详情
+        const vaultDetailPromises = vaultAddresses
+            .filter(item => item.address)
+            .map(item =>
+                vaultManager.getVaultDetails(item.address)
+                    .then(details => {
+                        if (!details) return null;
+                        const decimals = details.tokenDecimals || 18;
+                        return {
+                            address: item.address,
+                            ...details,
+                            blockNumber: item.index,
+                            totalDepositsFormatted: formatTokenAmount(details.totalDeposits, decimals),
+                            totalYesVotesFormatted: formatTokenAmount(details.totalYesVotes, decimals),
+                            tokenSymbol: details.tokenSymbol || 'TOKEN',
+                            vaultName: details.vaultName || '',
+                            displayName: details.vaultName && details.vaultName.trim()
+                                ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
+                                : (details.tokenSymbol || 'TOKEN')
+                        };
+                    })
+                    .catch(err => {
+                        console.warn(`加载金库 ${item.address} 详情失败:`, err.message);
+                        return null;
+                    })
+            );
+
+        const vaultDetails = await Promise.all(vaultDetailPromises);
+        allVaults = vaultDetails.filter(v => v !== null);
+
+        const loadTime = Date.now() - startTime;
+        console.log(`✓ 并行加载完成，共 ${allVaults.length} 个金库，耗时 ${loadTime}ms`);
 
         // 初始化无限滚动
         filteredVaults = sortVaults(allVaults, currentSort);
@@ -837,27 +864,59 @@ async function loadUserVaults() {
 
         const count = await vaultManager.getFactoryVaultCount();
 
+        console.log(`开始并行加载用户参与的 ${count} 个金库...`);
+        const startTime = Date.now();
+
+        // 并行获取所有金库地址
+        const vaultAddressPromises = [];
         for (let i = 0; i < count; i++) {
-            const vaultAddr = await vaultManager.getVaultAddress(i);
-            if (vaultAddr) {
-                const userInfo = await vaultManager.getUserVaultInfo(vaultAddr, walletAddress);
-                const principal = userInfo ? userInfo.principal || userInfo[0] : null;
-                if (principal && principal.gt(0)) {
-                    const details = await vaultManager.getVaultDetails(vaultAddr);
-                    const decimals = details ? (details.tokenDecimals || 18) : 18;
-                    userCache.participatedVaults.push({
-                        address: vaultAddr,
-                        depositAmount: formatTokenAmount(principal, decimals),
-                        consensusReached: details ? details.consensusReached : false,
-                        tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
-                        vaultName: details ? (details.vaultName || '') : '',
-                        displayName: details && details.vaultName && details.vaultName.trim()
-                            ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
-                            : (details ? details.tokenSymbol : 'TOKEN')
-                    });
-                }
-            }
+            vaultAddressPromises.push(
+                vaultManager.getVaultAddress(i)
+                    .catch(err => {
+                        console.warn(`获取第 ${i} 个金库地址失败:`, err.message);
+                        return null;
+                    })
+            );
         }
+
+        const vaultAddresses = await Promise.all(vaultAddressPromises);
+        const validAddresses = vaultAddresses.filter(addr => addr);
+        console.log(`已获取 ${validAddresses.length} 个有效金库地址`);
+
+        // 并行检查用户信息和获取金库详情
+        const userVaultPromises = validAddresses.map(vaultAddr =>
+            Promise.all([
+                vaultManager.getUserVaultInfo(vaultAddr, walletAddress),
+                vaultManager.getVaultDetails(vaultAddr)
+            ])
+                .then(([userInfo, details]) => {
+                    const principal = userInfo ? (userInfo.principal || userInfo[0]) : null;
+                    if (principal && principal.gt(0)) {
+                        const decimals = details ? (details.tokenDecimals || 18) : 18;
+                        return {
+                            address: vaultAddr,
+                            depositAmount: formatTokenAmount(principal, decimals),
+                            consensusReached: details ? details.consensusReached : false,
+                            tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
+                            vaultName: details ? (details.vaultName || '') : '',
+                            displayName: details && details.vaultName && details.vaultName.trim()
+                                ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
+                                : (details ? details.tokenSymbol : 'TOKEN')
+                        };
+                    }
+                    return null;
+                })
+                .catch(err => {
+                    console.warn(`加载用户金库 ${vaultAddr} 信息失败:`, err.message);
+                    return null;
+                })
+        );
+
+        const userVaults = await Promise.all(userVaultPromises);
+        userCache.participatedVaults = userVaults.filter(v => v !== null);
+
+        const loadTime = Date.now() - startTime;
+        console.log(`✓ 用户金库加载完成，共 ${userCache.participatedVaults.length} 个，耗时 ${loadTime}ms`);
 
         renderUserVaults();
     } catch (error) {
@@ -1025,61 +1084,35 @@ function setupEventListeners() {
 
                 hideLoading();
 
-                if (result.vaultAddress && result.vaultAddress !== ethers.constants.AddressZero) {
-                    // 检查用户输入的金库名称是否包含彩蛋关键词
-                    console.log('检查彩蛋 - vaultName:', vaultName);
-                    const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
-
-                    if (hasEasterEgg) {
-                        console.log('彩蛋触发！');
-                        // 合并成功消息和彩蛋消息
-                        const successMessage = `金库已创建！ 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
-                        // 彩蛋：用户手动关闭弹窗后再跳转（不自动关闭）
-                        showModal('创建成功', successMessage).then(() => {
-                            // 弹窗关闭后再跳转
-                            goToVaultDetail(result.vaultAddress);
-                        });
-                    } else {
-                        console.log('彩蛋未触发 - vaultName 不包含关键词');
-                        showModal('创建成功', `金库已创建！`);
-                        // 普通情况：2秒后自动跳转
-                        setTimeout(() => {
-                            goToVaultDetail(result.vaultAddress);
-                        }, 2000);
-                    }
-
-                    // 清空输入框
-                    document.getElementById('createVaultNameInput').value = '';
-                    document.getElementById('createTokenInput').value = '';
-                    document.getElementById('createDepositInput').value = '';
-                } else {
-                    // 检查用户输入的金库名称是否包含彩蛋关键词
-                    console.log('检查彩蛋 - vaultName:', vaultName);
-                    const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
-
-                    if (hasEasterEgg) {
-                        console.log('彩蛋触发！');
-                        // 合并成功消息和彩蛋消息
-                        const successMessage = `金库已创建，请稍后在列表中查看 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
-                        // 彩蛋：用户手动关闭弹窗后再刷新（不自动关闭）
-                        showModal('创建成功', successMessage).then(() => {
-                            // 弹窗关闭后再刷新金库列表
-                            init();
-                        });
-                    } else {
-                        console.log('彩蛋未触发 - vaultName 不包含关键词');
-                        showModal('创建成功', '金库已创建，请稍后在列表中查看');
-                        // 普通情况：2秒后自动刷新
-                        setTimeout(() => {
-                            init();
-                        }, 2000);
-                    }
-
-                    // 清空输入框
-                    document.getElementById('createVaultNameInput').value = '';
-                    document.getElementById('createTokenInput').value = '';
-                    document.getElementById('createDepositInput').value = '';
+                // 验证金库地址是否有效
+                if (!result.vaultAddress || result.vaultAddress === ethers.constants.AddressZero) {
+                    throw new Error('创建金库失败：未获取到有效的金库地址');
                 }
+
+                // 检查用户输入的金库名称是否包含彩蛋关键词
+                console.log('检查彩蛋 - vaultName:', vaultName);
+                const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
+
+                if (hasEasterEgg) {
+                    console.log('彩蛋触发！');
+                    const successMessage = `金库已创建！ 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
+                    // 彩蛋：用户手动关闭弹窗后再跳转（不自动关闭）
+                    showModal('创建成功', successMessage).then(() => {
+                        goToVaultDetail(result.vaultAddress);
+                    });
+                } else {
+                    console.log('彩蛋未触发 - vaultName 不包含关键词');
+                    showModal('创建成功', `金库已创建！`);
+                    // 普通情况：2秒后自动跳转
+                    setTimeout(() => {
+                        goToVaultDetail(result.vaultAddress);
+                    }, 2000);
+                }
+
+                // 清空输入框
+                document.getElementById('createVaultNameInput').value = '';
+                document.getElementById('createTokenInput').value = '';
+                document.getElementById('createDepositInput').value = '';
             } catch (error) {
                 hideLoading();
                 console.error('创建金库失败:', error);
@@ -1087,12 +1120,8 @@ function setupEventListeners() {
                 // 解析具体错误信息
                 let errorMessage = '创建金库时发生错误';
                 if (error.message) {
-                    if (error.message.includes('Last epoch still active')) {
-                        errorMessage = '该代币还有未解锁金库，不能创建新的金库';
-                    } else if (error.message.includes('user rejected') || error.message.includes('User denied')) {
+                    if (error.message.includes('user rejected') || error.message.includes('User denied')) {
                         errorMessage = '您取消了交易';
-                    } else if (error.message.includes('Vault already exists')) {
-                        errorMessage = '该代币的金库已经存在';
                     } else if (error.message.includes('insufficient funds')) {
                         errorMessage = '账户余额不足，无法支付gas费用';
                     } else {
