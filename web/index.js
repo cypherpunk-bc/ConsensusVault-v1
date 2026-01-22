@@ -1026,24 +1026,59 @@ function setupEventListeners() {
                 hideLoading();
 
                 if (result.vaultAddress && result.vaultAddress !== ethers.constants.AddressZero) {
-                    showModal('创建成功', `金库已创建！`);
+                    // 检查用户输入的金库名称是否包含彩蛋关键词
+                    console.log('检查彩蛋 - vaultName:', vaultName);
+                    const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
+
+                    if (hasEasterEgg) {
+                        console.log('彩蛋触发！');
+                        // 合并成功消息和彩蛋消息
+                        const successMessage = `金库已创建！ 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
+                        // 彩蛋：用户手动关闭弹窗后再跳转（不自动关闭）
+                        showModal('创建成功', successMessage).then(() => {
+                            // 弹窗关闭后再跳转
+                            goToVaultDetail(result.vaultAddress);
+                        });
+                    } else {
+                        console.log('彩蛋未触发 - vaultName 不包含关键词');
+                        showModal('创建成功', `金库已创建！`);
+                        // 普通情况：2秒后自动跳转
+                        setTimeout(() => {
+                            goToVaultDetail(result.vaultAddress);
+                        }, 2000);
+                    }
+
                     // 清空输入框
                     document.getElementById('createVaultNameInput').value = '';
                     document.getElementById('createTokenInput').value = '';
                     document.getElementById('createDepositInput').value = '';
-                    setTimeout(() => {
-                        goToVaultDetail(result.vaultAddress);
-                    }, 1500);
                 } else {
-                    showModal('创建成功', '金库已创建，请稍后在列表中查看');
+                    // 检查用户输入的金库名称是否包含彩蛋关键词
+                    console.log('检查彩蛋 - vaultName:', vaultName);
+                    const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
+
+                    if (hasEasterEgg) {
+                        console.log('彩蛋触发！');
+                        // 合并成功消息和彩蛋消息
+                        const successMessage = `金库已创建，请稍后在列表中查看 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
+                        // 彩蛋：用户手动关闭弹窗后再刷新（不自动关闭）
+                        showModal('创建成功', successMessage).then(() => {
+                            // 弹窗关闭后再刷新金库列表
+                            init();
+                        });
+                    } else {
+                        console.log('彩蛋未触发 - vaultName 不包含关键词');
+                        showModal('创建成功', '金库已创建，请稍后在列表中查看');
+                        // 普通情况：2秒后自动刷新
+                        setTimeout(() => {
+                            init();
+                        }, 2000);
+                    }
+
                     // 清空输入框
                     document.getElementById('createVaultNameInput').value = '';
                     document.getElementById('createTokenInput').value = '';
                     document.getElementById('createDepositInput').value = '';
-                    // 刷新金库列表
-                    setTimeout(() => {
-                        init();
-                    }, 2000);
                 }
             } catch (error) {
                 hideLoading();
@@ -1152,9 +1187,15 @@ function switchView(view) {
     }
 }
 
-function showModal(title, message) {
+function showEasterEgg() {
+    console.log('显示彩蛋消息');
+    const message = "Congratulations 🎉 You've discovered the Easter egg! You're gonna die!";
+    showModal('🎉 Easter Egg!', message);
+}
+
+function showModal(title, message, options = {}) {
     const overlay = document.getElementById('modalOverlay');
-    if (!overlay) return;
+    if (!overlay) return Promise.resolve();
 
     const titleEl = overlay.querySelector('.modal-title');
     const bodyEl = overlay.querySelector('.modal-body');
@@ -1164,13 +1205,40 @@ function showModal(title, message) {
 
     overlay.style.display = 'block';
 
-    const closeBtn = overlay.querySelector('.modal-close');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
+    return new Promise((resolve) => {
+        let isClosed = false;
+        const closeModal = () => {
+            if (isClosed) return;
+            isClosed = true;
             overlay.style.display = 'none';
+            resolve();
+        };
+
+        // 手动关闭按钮
+        const closeBtn = overlay.querySelector('.modal-close');
+        if (closeBtn) {
+            // 移除旧的事件监听器，添加新的
+            const newCloseBtn = closeBtn.cloneNode(true);
+            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+            newCloseBtn.addEventListener('click', closeModal);
+        }
+
+        // 点击背景关闭
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                closeModal();
+            }
         });
-    }
+
+        // 如果设置了自动关闭时间
+        if (options.autoClose) {
+            setTimeout(() => {
+                closeModal();
+            }, options.autoClose);
+        }
+    });
 }
+
 
 // 当同一代币存在多个未解锁金库时，弹出选择列表
 function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
