@@ -19,7 +19,7 @@
 const CONFIG = {
     chainId: '0x61',
     chainIdDec: 97,
-    rpcUrl: 'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+    rpcUrl: 'https://bsc-testnet.infura.io/v3/ccd622a8b114465aa32b55baa75efc35',
     explorer: 'https://testnet.bscscan.com'
 };
 
@@ -1761,6 +1761,33 @@ function sortVaults(vaults, method) {
                 const progressA = a.totalDeposits > 0 ? (a.totalYesVotes / a.totalDeposits) : 0;
                 const progressB = b.totalDeposits > 0 ? (b.totalYesVotes / b.totalDeposits) : 0;
                 return progressB - progressA;
+            });
+            break;
+
+        case 'marketValue':
+            // 按总市值倒序（需要价格数据）
+            sorted.sort((a, b) => {
+                // 计算总市值
+                const getMarketValue = (vault) => {
+                    if (!vault.priceData || !vault.totalDepositsFormatted) return 0;
+                    const depositsNum = parseFloat(vault.totalDepositsFormatted) || 0;
+                    return depositsNum * vault.priceData.price;
+                };
+
+                const valueA = getMarketValue(a);
+                const valueB = getMarketValue(b);
+
+                // 有价格数据的排在前面，然后按市值排序
+                if (valueA > 0 && valueB > 0) {
+                    return valueB - valueA;
+                } else if (valueA > 0) {
+                    return -1; // a 有价格，排在前面
+                } else if (valueB > 0) {
+                    return 1; // b 有价格，排在前面
+                } else {
+                    // 都没有价格，按区块号排序
+                    return (b.blockNumber || 0) - (a.blockNumber || 0);
+                }
             });
             break;
     }

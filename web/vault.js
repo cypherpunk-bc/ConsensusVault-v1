@@ -7,7 +7,7 @@
 const CONFIG = {
     chainId: '0x61',
     chainIdDec: 97,
-    rpcUrl: 'https://data-seed-prebsc-1-s1.bnbchain.org:8545',
+    rpcUrl: 'https://bsc-testnet.infura.io/v3/ccd622a8b114465aa32b55baa75efc35',
     explorer: 'https://testnet.bscscan.com'
 };
 
@@ -115,6 +115,9 @@ function formatTimestamp(tsSeconds) {
 // 价格缓存
 const priceCache = new Map();
 const PRICE_CACHE_TTL = 10000; // 10秒缓存（充分利用 300次/分钟的限制）
+const PRICE_REFRESH_INTERVAL = 30000; // 30秒自动刷新一次价格
+let priceRefreshTimer = null; // 价格自动刷新定时器
+let currentVaultTokenAddress = null; // 当前金库的代币地址
 
 /**
  * 根据链ID获取DexScreener的chainId
@@ -789,31 +792,21 @@ async function loadVaultDetails() {
         }
 
         // 获取价格并计算总市值
+        currentVaultTokenAddress = depositTokenAddr; // 保存当前金库的代币地址
         if (depositTokenAddr) {
             if (elem('totalMarketValue')) {
                 // 先显示加载中
                 elem('totalMarketValue').textContent = '加载中...';
             }
-            getTokenPrice(depositTokenAddr).then(priceData => {
-                if (elem('totalMarketValue')) {
-                    if (priceData) {
-                        const totalValue = calculateTotalValue(totalPrincipalNum, priceData.price);
-                        elem('totalMarketValue').textContent = totalValue;
-                    } else {
-                        elem('totalMarketValue').textContent = 'N/A';
-                    }
-                }
-            }).catch(err => {
-                console.warn('获取价格失败:', err);
-                if (elem('totalMarketValue')) {
-                    elem('totalMarketValue').textContent = 'N/A';
-                }
-            });
+            refreshVaultPrice(depositTokenAddr, totalPrincipalNum);
         } else {
             if (elem('totalMarketValue')) {
                 elem('totalMarketValue').textContent = 'N/A';
             }
         }
+
+        // 启动价格自动刷新
+        startVaultPriceAutoRefresh(depositTokenAddr, totalPrincipalNum);
 
         console.log('✓ 金库详情加载完成');
     } catch (error) {
@@ -888,19 +881,9 @@ async function loadUserInfo() {
         }
 
         // 获取价格并计算用户持仓市值
+        currentVaultData.userPrincipalNum = principalNum; // 保存用户本金数据
         if (depositTokenAddr && principalNum > 0) {
-            getTokenPrice(depositTokenAddr).then(priceData => {
-                const myDepositValueEl = document.getElementById('myDepositValue');
-                if (myDepositValueEl && priceData) {
-                    const userValue = calculateTotalValue(principalNum, priceData.price);
-                    myDepositValueEl.textContent = `我的持仓市值: ${userValue}`;
-                    myDepositValueEl.style.display = 'block';
-                } else if (myDepositValueEl) {
-                    myDepositValueEl.style.display = 'none';
-                }
-            }).catch(err => {
-                console.warn('获取用户持仓市值失败:', err);
-            });
+            refreshUserPrice(depositTokenAddr, principalNum);
         } else {
             const myDepositValueEl = document.getElementById('myDepositValue');
             if (myDepositValueEl) {
@@ -1835,6 +1818,109 @@ async function updateMarketUserInfo() {
  * 1. MetaMask钱包直接转账
  * 2. 在PancakeSwap/Uniswap等DEX上交易
  */
+
+/**
+ * 刷新金库总市值
+ */
+async function refreshVaultPrice(tokenAddress, totalPrincipalNum) {
+    if (!tokenAddress) return;
+
+    try {
+        const priceData = await getTokenPrice(tokenAddress);
+        const elem = (id) => document.getElementById(id);
+        if (elem('totalMarketValue')) {
+            if (priceData) {
+                const totalValue = calculateTotalValue(totalPrincipalNum, priceData.price);
+                elem('totalMarketValue').textContent = totalValue;
+            } else {
+                elem('totalMarketValue').textContent = 'N/A';
+            }
+        }
+    } catch (err) {
+        console.warn('获取价格失败:', err);
+        const elem = (id) => document.getElementById(id);
+        if (elem('totalMarketValue')) {
+            elem('totalMarketValue').textContent = 'N/A';
+        }
+    }
+}
+
+/**
+ * 刷新用户持仓市值
+ */
+async function refreshUserPrice(tokenAddress, principalNum) {
+    if (!tokenAddress || principalNum <= 0) return;
+
+    try {
+        const priceData = await getTokenPrice(tokenAddress);
+        const myDepositValueEl = document.getElementById('myDepositValue');
+        if (myDepositValueEl && priceData) {
+            const userValue = calculateTotalValue(principalNum, priceData.price);
+            myDepositValueEl.textContent = `我的持仓市值: ${userValue}`;
+            myDepositValueEl.style.display = 'block';
+        } else if (myDepositValueEl) {
+            myDepositValueEl.style.display = 'none';
+        }
+    } catch (err) {
+        console.warn('获取用户持仓市值失败:', err);
+    }
+}
+
+// 保存当前金库的数据，用于自动刷新
+let currentVaultData = {
+    tokenAddress: null,
+    totalPrincipalNum: 0,
+    userPrincipalNum: 0
+};
+
+/**
+ * 启动金库详情页价格自动刷新
+ */
+function startVaultPriceAutoRefresh(tokenAddress, totalPrincipalNum) {
+    // 清除旧的定时器
+    if (priceRefreshTimer) {
+        clearInterval(priceRefreshTimer);
+    }
+
+    if (!tokenAddress) return;
+
+    // 保存当前金库数据
+    currentVaultData.tokenAddress = tokenAddress;
+    currentVaultData.totalPrincipalNum = totalPrincipalNum;
+
+    // 每30秒自动刷新一次价格
+    priceRefreshTimer = setInterval(async () => {
+        if (!currentVaultData.tokenAddress) return;
+
+        // 刷新金库总市值
+        if (currentVaultData.totalPrincipalNum > 0) {
+            await refreshVaultPrice(currentVaultData.tokenAddress, currentVaultData.totalPrincipalNum);
+        }
+
+        // 刷新用户持仓市值
+        if (currentVaultData.userPrincipalNum > 0) {
+            await refreshUserPrice(currentVaultData.tokenAddress, currentVaultData.userPrincipalNum);
+        }
+    }, PRICE_REFRESH_INTERVAL);
+
+    console.log(`[价格刷新] 已启动自动刷新，每 ${PRICE_REFRESH_INTERVAL / 1000} 秒刷新一次`);
+}
+
+/**
+ * 停止价格自动刷新定时器
+ */
+function stopVaultPriceAutoRefresh() {
+    if (priceRefreshTimer) {
+        clearInterval(priceRefreshTimer);
+        priceRefreshTimer = null;
+        console.log('[价格刷新] 已停止自动刷新');
+    }
+}
+
+// 页面卸载时清理定时器
+window.addEventListener('beforeunload', () => {
+    stopVaultPriceAutoRefresh();
+});
 
 // ===== 导出全局函数 =====
 window.goBack = goBack;
