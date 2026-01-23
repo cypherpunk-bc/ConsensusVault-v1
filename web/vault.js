@@ -25,10 +25,10 @@ const NETWORKS = {
     }
 };
 
-// 当前网络（从 localStorage 读取，默认测试网）
-let currentNetwork = localStorage.getItem('selectedNetwork') || 'testnet';
+// 当前网络（从 localStorage 读取，默认主网）
+let currentNetwork = localStorage.getItem('selectedNetwork') || 'mainnet';
 if (!NETWORKS[currentNetwork]) {
-    currentNetwork = 'testnet';
+    currentNetwork = 'mainnet';
 }
 
 // 当前配置（动态）
@@ -546,7 +546,7 @@ async function switchNetwork(network) {
             try {
                 // 检查当前钱包网络
                 const currentChainId = await walletProvider.request({ method: 'eth_chainId' });
-                
+
                 if (currentChainId !== CONFIG.chainId) {
                     console.log('🔄 切换钱包网络...');
                     try {
@@ -595,13 +595,17 @@ async function switchNetwork(network) {
 
         hideLoading();
         console.log(`✓ 网络切换完成: ${CONFIG.displayName}`);
-        showModal('切换成功', `已切换到 ${CONFIG.displayName}`);
+
+        // 显示切换成功提示，然后刷新页面以确保所有状态正确重置
+        // 特别是金库地址可能在新网络下无效，需要重新加载
+        showModal('切换成功', `已切换到 ${CONFIG.displayName}，页面即将刷新...`).then(() => {
+            window.location.reload();
+        });
 
     } catch (error) {
         hideLoading();
         console.error('切换网络失败:', error);
         showModal('切换失败', `切换网络时发生错误: ${error.message}`);
-    } finally {
         isNetworkSwitching = false;
     }
 }
@@ -611,7 +615,7 @@ async function switchNetwork(network) {
  */
 function updateNetworkUI() {
     const networkSelect = document.getElementById('networkSwitch');
-    
+
     if (networkSelect) {
         networkSelect.value = CONFIG.chainIdDec.toString();
         // 更新下拉菜单的显示文本（通过更新选项）
@@ -1266,14 +1270,14 @@ function setupEventListeners() {
         networkSelect.addEventListener('change', async (e) => {
             const selectedChainId = parseInt(e.target.value);
             let targetNetwork = null;
-            
+
             // 根据 chainId 确定目标网络
             if (selectedChainId === 56) {
                 targetNetwork = 'mainnet';
             } else if (selectedChainId === 97) {
                 targetNetwork = 'testnet';
             }
-            
+
             if (targetNetwork && targetNetwork !== currentNetwork) {
                 await switchNetwork(targetNetwork);
             }
