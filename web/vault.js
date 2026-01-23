@@ -1390,7 +1390,7 @@ function setupEventListeners() {
 
     // 存款按钮
     addButtonHandler('depositBtn', async (btn) => {
-        if (checkDisabled(btn, { unlocked: { title: '无法存款', message: '这个金库已经达成共识解锁了，不再接受新的存款。\n\n您现在可以提现您的本金和收益。' } })) return;
+        if (checkDisabled(btn, { unlocked: { title: '无法存款', message: '这个金库已经达成共识解锁了，不再接受新的存款。' } })) return;
         if (!walletAddress) {
             showModal('还没连接钱包', '请先点击右上角连接您的钱包');
             return;
@@ -1405,7 +1405,7 @@ function setupEventListeners() {
 
     // 投票按钮
     addButtonHandler('voteBtn', async (btn) => {
-        if (checkDisabled(btn, { unlocked: { title: '无法投票', message: '金库已达成共识解锁了，不再接受投票。\n\n您现在可以提现您的本金和收益。' } })) return;
+        if (checkDisabled(btn, { unlocked: { title: '无法投票', message: '金库已达成共识解锁了，不再接受投票。' } })) return;
         if (!walletAddress) {
             showModal('还没连接钱包', '请先点击右上角连接您的钱包');
             return;
@@ -1558,7 +1558,7 @@ function showModal(title, message, options = {}) {
             // 移除旧的事件监听器，添加新的
             const newCloseBtn = closeBtn.cloneNode(true);
             closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-            
+
             // 同时支持点击和触摸事件（移动端兼容）
             newCloseBtn.addEventListener('click', closeModal);
             newCloseBtn.addEventListener('touchend', (e) => {
@@ -1573,11 +1573,11 @@ function showModal(title, message, options = {}) {
                 closeModal();
             }
         };
-        
+
         // 移除旧的事件监听器
         overlay.removeEventListener('click', handleOverlayClick);
         overlay.removeEventListener('touchend', handleOverlayClick);
-        
+
         // 添加新的事件监听器
         overlay.addEventListener('click', handleOverlayClick);
         overlay.addEventListener('touchend', (e) => {
@@ -1777,7 +1777,7 @@ async function vote() {
         const consensusReached = await vault.consensusReached();
         if (consensusReached) {
             hideLoading();
-            showModal('金库已解锁', '金库已达成共识解锁了，不再接受投票。\n\n您现在可以提现您的本金和收益。');
+            showModal('金库已解锁', '金库已达成共识解锁了，不再接受投票。');
             return;
         }
 
