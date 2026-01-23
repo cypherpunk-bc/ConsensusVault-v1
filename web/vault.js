@@ -7,7 +7,7 @@
 const CONFIG = {
     chainId: '0x61',
     chainIdDec: 97,
-    rpcUrl: 'https://bsc-testnet.infura.io/v3/ccd622a8b114465aa32b55baa75efc35',
+    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545', // 币安官方 BSC Testnet 节点（更快）
     explorer: 'https://testnet.bscscan.com'
 };
 
@@ -184,7 +184,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
         const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${tokenAddress}`;
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时（DexScreener API 可能较慢）
 
         const response = await fetch(url, {
             signal: controller.signal
@@ -486,11 +486,12 @@ async function init() {
         // 2. 加载 ABI
         await loadABIs();
 
-        // 3. 初始化 Provider
+        // 3. 初始化只读 provider：固定使用币安官方 RPC（不依赖钱包网络，解决 Binance 钱包问题）
+        provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
+        console.log('✓ 使用固定 RPC 进行只读操作:', CONFIG.rpcUrl);
+
         const walletProvider = getWalletProvider();
         if (walletProvider) {
-            provider = new ethers.providers.Web3Provider(walletProvider, 'any');
-            console.log('✓ Web3Provider 初始化完成');
             console.log('当前域名:', window.location.origin);
             console.log('当前协议:', window.location.protocol);
 
@@ -502,7 +503,9 @@ async function init() {
                 const accounts = await walletProvider.request({ method: 'eth_accounts' });
                 if (accounts && accounts.length > 0) {
                     walletAddress = accounts[0];
-                    signer = provider.getSigner();
+                    // 只初始化 signer（用于写操作），provider 保持不变（用于只读）
+                    const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+                    signer = web3Provider.getSigner();
                     console.log('✓ 自动连接钱包:', walletAddress);
                     updateUI();
                 }
@@ -510,9 +513,7 @@ async function init() {
                 console.log('用户未授权钱包:', e.message);
             }
         } else {
-            // 只读模式：使用公共 RPC
-            provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
-            console.log('⚠ 未检测到钱包，使用只读模式');
+            console.warn('⚠ 未检测到钱包，使用只读模式');
         }
 
         // 4. 加载金库详情和用户信息
@@ -620,10 +621,22 @@ async function connectWallet() {
             }
         }
 
-        // 网络切换后，重新初始化 provider 和 signer
-        provider = new ethers.providers.Web3Provider(walletProvider, 'any');
-        signer = provider.getSigner();
+        // 网络切换后，只初始化 signer（用于写操作），provider 保持不变（用于只读）
+        const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+        signer = web3Provider.getSigner();
 
+        // 检查钱包网络是否匹配（如果不匹配，提示用户只能查看不能操作）
+        try {
+            const chainId = await walletProvider.request({ method: 'eth_chainId' });
+            if (chainId !== CONFIG.chainId) {
+                console.warn('⚠ 钱包网络不匹配，只能查看，不能进行链上操作');
+                showModal('网络不匹配', `当前钱包网络与 BSC Testnet 不匹配，您只能查看数据，无法进行存款、提现等操作。`);
+            }
+        } catch (e) {
+            console.warn('检查钱包网络失败:', e);
+        }
+
+        // 使用固定 provider 获取网络信息（用于显示）
         const network = await provider.getNetwork();
         currentNetwork = network.chainId === 56 ? 'mainnet' : 'testnet';
 
@@ -791,14 +804,20 @@ async function loadVaultDetails() {
             if (elem('totalDonations')) elem('totalDonations').textContent = '0';
         }
 
-        // 获取价格并计算总市值
+        // 异步获取价格并计算总市值（不阻塞主流程）
         currentVaultTokenAddress = depositTokenAddr; // 保存当前金库的代币地址
         if (depositTokenAddr) {
             if (elem('totalMarketValue')) {
                 // 先显示加载中
                 elem('totalMarketValue').textContent = '加载中...';
             }
-            refreshVaultPrice(depositTokenAddr, totalPrincipalNum);
+            // 异步执行，不阻塞渲染
+            refreshVaultPrice(depositTokenAddr, totalPrincipalNum).catch(err => {
+                console.warn('价格加载失败:', err);
+                if (elem('totalMarketValue')) {
+                    elem('totalMarketValue').textContent = 'N/A';
+                }
+            });
         } else {
             if (elem('totalMarketValue')) {
                 elem('totalMarketValue').textContent = 'N/A';
@@ -880,10 +899,19 @@ async function loadUserInfo() {
             console.warn('[loadUserInfo] 找不到 myDeposit 元素');
         }
 
-        // 获取价格并计算用户持仓市值
+        // 异步获取价格并计算用户持仓市值（不阻塞主流程）
         currentVaultData.userPrincipalNum = principalNum; // 保存用户本金数据
         if (depositTokenAddr && principalNum > 0) {
-            refreshUserPrice(depositTokenAddr, principalNum);
+            if (document.getElementById('myDepositValue')) {
+                document.getElementById('myDepositValue').textContent = '加载中...';
+            }
+            // 异步执行，不阻塞渲染
+            refreshUserPrice(depositTokenAddr, principalNum).catch(err => {
+                console.warn('用户价格加载失败:', err);
+                if (document.getElementById('myDepositValue')) {
+                    document.getElementById('myDepositValue').textContent = 'N/A';
+                }
+            });
         } else {
             const myDepositValueEl = document.getElementById('myDepositValue');
             if (myDepositValueEl) {
@@ -1189,9 +1217,11 @@ function setupEventListeners() {
             } else if (accounts[0] !== walletAddress) {
                 // 仅更新账户并刷新用户信息（不弹“连接成功”提示）
                 walletAddress = accounts[0];
-                signer = provider ? provider.getSigner() : null;
+                // 重新连接钱包（只更新 signer，不改变 provider）
+                const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+                signer = web3Provider.getSigner();
                 updateUI();
-                loadUserInfo();
+                loadUserInfo(); // 刷新用户信息（只读依然走固定 RPC）
             }
         });
 
