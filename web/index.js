@@ -1869,7 +1869,7 @@ function showModal(title, message, options = {}) {
     if (titleEl) titleEl.textContent = title;
     if (bodyEl) bodyEl.textContent = message;
 
-    overlay.style.display = 'block';
+    overlay.style.display = 'flex'; // 使用 flex 确保正确显示
 
     return new Promise((resolve) => {
         let isClosed = false;
@@ -1880,13 +1880,19 @@ function showModal(title, message, options = {}) {
             resolve();
         };
 
-        // 手动关闭按钮
+        // 手动关闭按钮 - 支持点击和触摸事件（移动端兼容）
         const closeBtn = overlay.querySelector('.modal-close');
         if (closeBtn) {
             // 移除旧的事件监听器，添加新的
             const newCloseBtn = closeBtn.cloneNode(true);
             closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+            
+            // 同时支持点击和触摸事件（移动端兼容）
             newCloseBtn.addEventListener('click', closeModal);
+            newCloseBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                closeModal();
+            });
         }
 
         // 点击背景关闭
@@ -1964,7 +1970,7 @@ function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
         `;
     }
 
-    overlay.style.display = 'block';
+    overlay.style.display = 'flex'; // 使用 flex 确保正确显示
 
     // 绑定每个按钮的点击事件
     const buttons = overlay.querySelectorAll('.vault-select-btn');

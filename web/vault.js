@@ -1456,13 +1456,69 @@ function hideLoading() {
     if (overlay) overlay.style.display = 'none';
 }
 
-function showModal(title, message) {
+function showModal(title, message, options = {}) {
     const overlay = document.getElementById('modalOverlay');
-    if (!overlay) return;
+    if (!overlay) return Promise.resolve();
 
-    overlay.querySelector('.modal-title').textContent = title;
-    overlay.querySelector('.modal-body').textContent = message;
-    overlay.style.display = 'block';
+    const titleEl = overlay.querySelector('.modal-title');
+    const bodyEl = overlay.querySelector('.modal-body');
+
+    if (titleEl) titleEl.textContent = title;
+    if (bodyEl) bodyEl.textContent = message;
+
+    overlay.style.display = 'flex'; // 使用 flex 确保正确显示
+
+    return new Promise((resolve) => {
+        let isClosed = false;
+        const closeModal = () => {
+            if (isClosed) return;
+            isClosed = true;
+            overlay.style.display = 'none';
+            resolve();
+        };
+
+        // 手动关闭按钮 - 支持点击和触摸事件
+        const closeBtn = overlay.querySelector('.modal-close');
+        if (closeBtn) {
+            // 移除旧的事件监听器，添加新的
+            const newCloseBtn = closeBtn.cloneNode(true);
+            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
+            
+            // 同时支持点击和触摸事件（移动端兼容）
+            newCloseBtn.addEventListener('click', closeModal);
+            newCloseBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                closeModal();
+            });
+        }
+
+        // 点击背景关闭 - 支持点击和触摸事件
+        const handleOverlayClick = (e) => {
+            if (e.target === overlay) {
+                closeModal();
+            }
+        };
+        
+        // 移除旧的事件监听器
+        overlay.removeEventListener('click', handleOverlayClick);
+        overlay.removeEventListener('touchend', handleOverlayClick);
+        
+        // 添加新的事件监听器
+        overlay.addEventListener('click', handleOverlayClick);
+        overlay.addEventListener('touchend', (e) => {
+            if (e.target === overlay) {
+                e.preventDefault();
+                closeModal();
+            }
+        });
+
+        // 如果设置了自动关闭时间
+        if (options.autoClose) {
+            setTimeout(() => {
+                closeModal();
+            }, options.autoClose);
+        }
+    });
 }
 
 function goBack() {

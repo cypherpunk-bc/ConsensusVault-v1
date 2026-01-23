@@ -703,13 +703,24 @@ select option {
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 20px;
+    font-size: 24px;
     cursor: pointer;
-    padding: 0;
+    padding: 8px; /* 增大点击区域 */
+    min-width: 44px; /* 移动端最小触摸目标 */
+    min-height: 44px; /* 移动端最小触摸目标 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent; /* 移除移动端点击高亮 */
+    touch-action: manipulation; /* 优化触摸响应 */
 }
 
-.modal-close:hover {
+.modal-close:hover,
+.modal-close:active {
     color: var(--text);
+    background: rgba(0, 0, 0, 0.05);
 }
 
 .modal-body {
