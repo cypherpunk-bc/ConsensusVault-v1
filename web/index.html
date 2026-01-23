@@ -38,7 +38,10 @@
             <div class="nav-right">
                 <div class="chain-info" id="networkInfo">
                     <i class="fas fa-network-wired"></i>
-                    <span style="margin-right:15px; color:#666;">BSC 主网</span>
+                    <select id="networkSelect" class="network-select" style="margin-right:15px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; background: white; color: #333; font-size: 14px; cursor: pointer;">
+                        <option value="mainnet">BSC 主网</option>
+                        <option value="testnet">BSC 测试网</option>
+                    </select>
                 </div>
                 <button id="connectButton" class="btn primary">
                     <i class="fas fa-wallet"></i>

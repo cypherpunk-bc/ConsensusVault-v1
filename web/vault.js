@@ -3,20 +3,44 @@
 // ============================================
 
 // ===== 配置 =====
-// BSC测试网（Chain ID: 97）
-const CONFIG = {
-    chainId: '0x61',
-    chainIdDec: 97,
-    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545', // 币安官方 BSC Testnet 节点（更快）
-    explorer: 'https://testnet.bscscan.com'
+// 网络配置对象
+const NETWORKS = {
+    mainnet: {
+        chainId: '0x38',
+        chainIdDec: 56,
+        chainName: 'BNB Smart Chain',
+        displayName: 'BSC 主网',
+        rpcUrl: 'https://bsc-dataseed.bnbchain.org',
+        explorer: 'https://bscscan.com',
+        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 主网工厂合约地址（需要替换为实际地址）
+    },
+    testnet: {
+        chainId: '0x61',
+        chainIdDec: 97,
+        chainName: 'BSC Testnet',
+        displayName: 'BSC 测试网',
+        rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
+        explorer: 'https://testnet.bscscan.com',
+        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 测试网工厂合约地址
+    }
 };
 
-const VAULT_FACTORY_ADDRESS = '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98';
+// 当前网络（从 localStorage 读取，默认测试网）
+let currentNetwork = localStorage.getItem('selectedNetwork') || 'testnet';
+if (!NETWORKS[currentNetwork]) {
+    currentNetwork = 'testnet';
+}
+
+// 当前配置（动态）
+let CONFIG = { ...NETWORKS[currentNetwork] };
+
+// 工厂合约地址（根据当前网络动态获取）
+let VAULT_FACTORY_ADDRESS = CONFIG.factoryAddress;
 
 // ===== 全局状态 =====
 let provider, signer, walletAddress;
 let vaultAddress = null;
-let currentNetwork = 'testnet'; // 当前网络：'mainnet' 或 'testnet'
+let isNetworkSwitching = false; // 网络切换标志，防止重复切换
 let VAULT_FACTORY_ABI = [];
 let CONSENSUS_VAULT_ABI = [];
 
@@ -121,12 +145,13 @@ let currentVaultTokenAddress = null; // 当前金库的代币地址
 
 /**
  * 根据链ID获取DexScreener的chainId
- * @param {number} chainIdDec - 链ID（十进制）
+ * @param {number} chainIdDec - 链ID（十进制），可选，默认使用当前 CONFIG
  * @returns {string} DexScreener chainId
  */
-function getDexScreenerChainId(chainIdDec) {
-    if (chainIdDec === 56) return 'bsc';
-    if (chainIdDec === 97) return 'bsc-testnet';
+function getDexScreenerChainId(chainIdDec = null) {
+    const chainId = chainIdDec || CONFIG.chainIdDec;
+    if (chainId === 56) return 'bsc';
+    if (chainId === 97) return 'bsc-testnet';
     return 'bsc'; // 默认BSC主网
 }
 
@@ -466,11 +491,147 @@ async function verifyTokenTransfer(receipt, tokenAddress, expectedFrom, expected
 }
 
 // ===== 初始化函数 =====
+// ===== 网络切换函数 =====
+/**
+ * 切换网络
+ * @param {string} network - 'mainnet' 或 'testnet'
+ */
+async function switchNetwork(network) {
+    if (isNetworkSwitching) {
+        console.warn('网络切换正在进行中，请稍候...');
+        return;
+    }
+
+    if (!NETWORKS[network]) {
+        console.error('无效的网络:', network);
+        return;
+    }
+
+    if (currentNetwork === network) {
+        console.log('已经是目标网络:', network);
+        return;
+    }
+
+    try {
+        isNetworkSwitching = true;
+        showLoading('切换网络中...');
+
+        console.log(`🔄 切换网络: ${currentNetwork} -> ${network}`);
+
+        // 1. 更新当前网络和配置
+        currentNetwork = network;
+        CONFIG = { ...NETWORKS[network] };
+        VAULT_FACTORY_ADDRESS = CONFIG.factoryAddress;
+
+        // 2. 保存到 localStorage
+        localStorage.setItem('selectedNetwork', network);
+
+        // 3. 重新初始化 provider
+        provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
+        console.log('✓ 已更新 RPC:', CONFIG.rpcUrl);
+
+        // 4. 清除价格缓存
+        priceCache.clear();
+        console.log('✓ 已清除价格缓存');
+
+        // 5. 停止价格自动刷新
+        stopVaultPriceAutoRefresh();
+
+        // 6. 更新 UI
+        updateNetworkUI();
+
+        // 7. 如果已连接钱包，尝试切换钱包网络
+        const walletProvider = getWalletProvider();
+        if (walletProvider && walletAddress) {
+            try {
+                // 检查当前钱包网络
+                const currentChainId = await walletProvider.request({ method: 'eth_chainId' });
+                
+                if (currentChainId !== CONFIG.chainId) {
+                    console.log('🔄 切换钱包网络...');
+                    try {
+                        await walletProvider.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: CONFIG.chainId }],
+                        });
+                    } catch (switchError) {
+                        // 如果网络不存在，添加网络
+                        if (switchError.code === 4902) {
+                            await walletProvider.request({
+                                method: 'wallet_addEthereumChain',
+                                params: [{
+                                    chainId: CONFIG.chainId,
+                                    chainName: CONFIG.chainName,
+                                    nativeCurrency: {
+                                        name: 'BNB',
+                                        symbol: 'BNB',
+                                        decimals: 18
+                                    },
+                                    rpcUrls: [CONFIG.rpcUrl],
+                                    blockExplorerUrls: [CONFIG.explorer]
+                                }],
+                            });
+                        } else if (switchError.code !== 4001) {
+                            // 4001 是用户取消，不抛出
+                            throw switchError;
+                        }
+                    }
+
+                    // 更新 signer
+                    const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+                    signer = web3Provider.getSigner();
+                }
+            } catch (error) {
+                console.warn('切换钱包网络失败:', error);
+                // 即使钱包网络切换失败，也继续使用新的 RPC
+            }
+        }
+
+        // 8. 重新加载金库数据
+        await loadVaultDetails();
+        if (walletAddress) {
+            await loadUserInfo();
+        }
+
+        hideLoading();
+        console.log(`✓ 网络切换完成: ${CONFIG.displayName}`);
+        showModal('切换成功', `已切换到 ${CONFIG.displayName}`);
+
+    } catch (error) {
+        hideLoading();
+        console.error('切换网络失败:', error);
+        showModal('切换失败', `切换网络时发生错误: ${error.message}`);
+    } finally {
+        isNetworkSwitching = false;
+    }
+}
+
+/**
+ * 更新网络 UI 显示
+ */
+function updateNetworkUI() {
+    const networkSelect = document.getElementById('networkSwitch');
+    
+    if (networkSelect) {
+        networkSelect.value = CONFIG.chainIdDec.toString();
+        // 更新下拉菜单的显示文本（通过更新选项）
+        const options = networkSelect.querySelectorAll('option');
+        options.forEach(opt => {
+            if (opt.value === CONFIG.chainIdDec.toString()) {
+                opt.selected = true;
+            }
+        });
+    }
+}
+
 async function init() {
     try {
         console.log('=== 初始化 vault.js ===');
 
-        // 1. 获取金库地址
+        // 1. 更新网络 UI
+        updateNetworkUI();
+
+        // 2. 获取金库地址
         const params = new URLSearchParams(window.location.search);
         vaultAddress = params.get('vault') || sessionStorage.getItem('selectedVault');
 
@@ -483,12 +644,13 @@ async function init() {
         console.log('✓ 金库地址:', vaultAddress);
         document.getElementById('vaultAddress').textContent = vaultAddress;
 
-        // 2. 加载 ABI
+        // 3. 加载 ABI
         await loadABIs();
 
-        // 3. 初始化只读 provider：固定使用币安官方 RPC（不依赖钱包网络，解决 Binance 钱包问题）
+        // 4. 初始化只读 provider：固定使用币安官方 RPC（不依赖钱包网络，解决 Binance 钱包问题）
         provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
         console.log('✓ 使用固定 RPC 进行只读操作:', CONFIG.rpcUrl);
+        console.log('✓ 当前网络:', CONFIG.displayName);
 
         const walletProvider = getWalletProvider();
         if (walletProvider) {
@@ -600,7 +762,7 @@ async function connectWallet() {
                         method: 'wallet_addEthereumChain',
                         params: [{
                             chainId: CONFIG.chainId,
-                            chainName: 'BSC Testnet',
+                            chainName: CONFIG.chainName,
                             nativeCurrency: {
                                 name: 'BNB',
                                 symbol: 'BNB',
@@ -630,7 +792,7 @@ async function connectWallet() {
             const chainId = await walletProvider.request({ method: 'eth_chainId' });
             if (chainId !== CONFIG.chainId) {
                 console.warn('⚠ 钱包网络不匹配，只能查看，不能进行链上操作');
-                showModal('网络不匹配', `当前钱包网络与 BSC Testnet 不匹配，您只能查看数据，无法进行存款、提现等操作。`);
+                showModal('网络不匹配', `当前钱包网络与 ${CONFIG.displayName} 不匹配，您只能查看数据，无法进行存款、提现等操作。`);
             }
         } catch (e) {
             console.warn('检查钱包网络失败:', e);
@@ -1098,6 +1260,26 @@ function formatAddress(addr) {
 }
 
 function setupEventListeners() {
+    // 网络切换下拉菜单
+    const networkSelect = document.getElementById('networkSwitch');
+    if (networkSelect) {
+        networkSelect.addEventListener('change', async (e) => {
+            const selectedChainId = parseInt(e.target.value);
+            let targetNetwork = null;
+            
+            // 根据 chainId 确定目标网络
+            if (selectedChainId === 56) {
+                targetNetwork = 'mainnet';
+            } else if (selectedChainId === 97) {
+                targetNetwork = 'testnet';
+            }
+            
+            if (targetNetwork && targetNetwork !== currentNetwork) {
+                await switchNetwork(targetNetwork);
+            }
+        });
+    }
+
     // 连接钱包按钮
     const connectBtn = document.getElementById('connectButton');
     if (connectBtn) {
@@ -1225,9 +1407,18 @@ function setupEventListeners() {
             }
         });
 
-        walletProvider.on('chainChanged', () => {
-            console.log('网络已切换，重新加载页面');
-            window.location.reload();
+        walletProvider.on('chainChanged', async (chainId) => {
+            console.log('钱包网络已切换:', chainId);
+            // 检查是否匹配当前配置的网络
+            if (chainId !== CONFIG.chainId) {
+                console.warn('⚠ 钱包网络与当前配置不匹配');
+                // 不自动切换，让用户手动选择
+            } else {
+                // 网络匹配，更新 signer
+                const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+                signer = web3Provider.getSigner();
+                console.log('✓ 钱包网络已匹配当前配置');
+            }
         });
     }
 }
