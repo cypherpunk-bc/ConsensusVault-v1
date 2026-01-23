@@ -250,6 +250,21 @@ p,
     box-shadow: 0 6px 20px rgba(255, 122, 26, 0.3);
 }
 
+/* 禁用状态按钮样式（仍然可以点击以显示提示） */
+.btn-disabled,
+.btn.btn-disabled {
+    opacity: 0.5;
+    cursor: pointer !important; /* 确保仍然可以点击 */
+    pointer-events: auto !important; /* 确保事件可以触发 */
+    position: relative;
+}
+
+.btn-disabled:hover,
+.btn.btn-disabled:hover {
+    opacity: 0.7;
+    transform: translateY(-1px);
+}
+
 .btn-secondary {
     background: var(--surface-2);
     color: var(--text);

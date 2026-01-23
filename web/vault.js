@@ -44,6 +44,13 @@ let isNetworkSwitching = false; // 网络切换标志，防止重复切换
 let VAULT_FACTORY_ABI = [];
 let CONSENSUS_VAULT_ABI = [];
 
+// 金库状态（用于按钮禁用检查）
+let vaultState = {
+    consensusReached: false,
+    unlockAt: 0,
+    canWithdraw: false
+};
+
 // 扩展的 ERC20 ABI（包含 Transfer 事件和常用函数）
 const ERC20_EXTENDED_ABI = [
     'function balanceOf(address owner) view returns (uint256)',
@@ -946,12 +953,52 @@ async function loadVaultDetails() {
             }
         }
 
-        // 禁用/启用按钮根据状态
-        if (elem('depositBtn')) elem('depositBtn').disabled = consensusReached;
-        if (elem('voteBtn')) elem('voteBtn').disabled = consensusReached;
-        if (elem('donateBtn')) elem('donateBtn').disabled = consensusReached;
+        // 保存金库状态到全局变量（用于按钮点击检查）
+        const canWithdraw = consensusReached && (unlockAtNum === 0 || nowSec >= unlockAtNum);
+        vaultState = {
+            consensusReached: consensusReached,
+            unlockAt: unlockAtNum,
+            canWithdraw: canWithdraw
+        };
+
+        // 设置按钮状态（不设置 disabled，以便点击时能显示提示）
+        if (elem('depositBtn')) {
+            elem('depositBtn').setAttribute('data-disabled-reason', consensusReached ? 'unlocked' : '');
+            if (consensusReached) {
+                elem('depositBtn').classList.add('btn-disabled');
+            } else {
+                elem('depositBtn').classList.remove('btn-disabled');
+            }
+        }
+        if (elem('voteBtn')) {
+            elem('voteBtn').setAttribute('data-disabled-reason', consensusReached ? 'unlocked' : '');
+            if (consensusReached) {
+                elem('voteBtn').classList.add('btn-disabled');
+            } else {
+                elem('voteBtn').classList.remove('btn-disabled');
+            }
+        }
+        if (elem('donateBtn')) {
+            elem('donateBtn').setAttribute('data-disabled-reason', consensusReached ? 'unlocked' : '');
+            if (consensusReached) {
+                elem('donateBtn').classList.add('btn-disabled');
+            } else {
+                elem('donateBtn').classList.remove('btn-disabled');
+            }
+        }
         if (elem('withdrawBtn')) {
-            elem('withdrawBtn').disabled = !consensusReached || (unlockAtNum > 0 && nowSec < unlockAtNum);
+            const withdrawDisabled = !consensusReached || (unlockAtNum > 0 && nowSec < unlockAtNum);
+            if (withdrawDisabled) {
+                if (!consensusReached) {
+                    elem('withdrawBtn').setAttribute('data-disabled-reason', 'not-unlocked');
+                } else if (unlockAtNum > 0 && nowSec < unlockAtNum) {
+                    elem('withdrawBtn').setAttribute('data-disabled-reason', 'waiting-unlock');
+                }
+                elem('withdrawBtn').classList.add('btn-disabled');
+            } else {
+                elem('withdrawBtn').setAttribute('data-disabled-reason', '');
+                elem('withdrawBtn').classList.remove('btn-disabled');
+            }
         }
 
         // 获取累计捐赠总额（从合约状态读取，而不是查询事件以避免 RPC 限制）
@@ -1310,63 +1357,91 @@ function setupEventListeners() {
         });
     }
 
+    // 通用按钮点击处理（支持移动端触摸）
+    const addButtonHandler = (btnId, handler) => {
+        const btn = document.getElementById(btnId);
+        if (!btn) return;
+        const handleClick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handler(btn);
+        };
+        btn.addEventListener('click', handleClick);
+        btn.addEventListener('touchend', handleClick);
+    };
+
+    // 检查禁用状态并显示提示
+    const checkDisabled = (btn, messages) => {
+        const reason = btn.getAttribute('data-disabled-reason');
+        if (reason && messages[reason]) {
+            showModal(messages[reason].title, messages[reason].message);
+            return true;
+        }
+        if (reason === 'waiting-unlock') {
+            const unlockTime = vaultState.unlockAt > 0 ? formatTimestamp(vaultState.unlockAt) : '未知时间';
+            const nowSec = Math.floor(Date.now() / 1000);
+            const remainingSec = Math.max(vaultState.unlockAt - nowSec, 0);
+            const remainingHours = Math.ceil(remainingSec / 3600);
+            showModal('提现时间未到', `金库已解锁，但提现时间尚未到达。\n\n解锁时间：${unlockTime}\n\n约 ${remainingHours} 小时后可提现。`);
+            return true;
+        }
+        return false;
+    };
+
     // 存款按钮
-    const depositBtn = document.getElementById('depositBtn');
-    if (depositBtn) {
-        depositBtn.addEventListener('click', async () => {
-            if (!walletAddress) {
-                showModal('还没连接钱包', '请先点击右上角连接您的钱包');
-                return;
-            }
-            const amount = document.getElementById('depositAmount')?.value?.trim();
-            if (!amount || parseFloat(amount) <= 0) {
-                showModal('金额不对', '请输入有效的金额');
-                return;
-            }
-            await deposit(amount);
-        });
-    }
+    addButtonHandler('depositBtn', async (btn) => {
+        if (checkDisabled(btn, { unlocked: { title: '无法存款', message: '这个金库已经达成共识解锁了，不再接受新的存款。\n\n您现在可以提现您的本金和收益。' } })) return;
+        if (!walletAddress) {
+            showModal('还没连接钱包', '请先点击右上角连接您的钱包');
+            return;
+        }
+        const amount = document.getElementById('depositAmount')?.value?.trim();
+        if (!amount || parseFloat(amount) <= 0) {
+            showModal('金额不对', '请输入有效的金额');
+            return;
+        }
+        await deposit(amount);
+    });
 
     // 投票按钮
-    const voteBtn = document.getElementById('voteBtn');
-    if (voteBtn) {
-        voteBtn.addEventListener('click', async () => {
-            if (!walletAddress) {
-                showModal('还没连接钱包', '请先点击右上角连接您的钱包');
-                return;
-            }
-            await vote();
-        });
-    }
+    addButtonHandler('voteBtn', async (btn) => {
+        if (checkDisabled(btn, { unlocked: { title: '无法投票', message: '金库已达成共识解锁了，不再接受投票。\n\n您现在可以提现您的本金和收益。' } })) return;
+        if (!walletAddress) {
+            showModal('还没连接钱包', '请先点击右上角连接您的钱包');
+            return;
+        }
+        await vote();
+    });
 
     // 提现按钮
-    const withdrawBtn = document.getElementById('withdrawBtn');
-    if (withdrawBtn) {
-        withdrawBtn.addEventListener('click', async () => {
-            if (!walletAddress) {
-                showModal('还没连接钱包', '请先点击右上角连接您的钱包');
-                return;
-            }
-            await withdraw();
-        });
-    }
+    addButtonHandler('withdrawBtn', async (btn) => {
+        const reason = btn.getAttribute('data-disabled-reason');
+        if (reason === 'not-unlocked') {
+            showModal('无法提现', '金库尚未达成共识解锁，无法提现。\n\n请等待共识达成后，金库解锁才能提现本金和收益。');
+            return;
+        }
+        if (checkDisabled(btn, {})) return;
+        if (!walletAddress) {
+            showModal('还没连接钱包', '请先点击右上角连接您的钱包');
+            return;
+        }
+        await withdraw();
+    });
 
     // 捐赠按钮
-    const donateBtn = document.getElementById('donateBtn');
-    if (donateBtn) {
-        donateBtn.addEventListener('click', async () => {
-            if (!walletAddress) {
-                showModal('还没连接钱包', '请先点击右上角连接您的钱包');
-                return;
-            }
-            const amount = document.getElementById('donateAmount')?.value?.trim();
-            if (!amount || parseFloat(amount) <= 0) {
-                showModal('金额不对', '请输入有效的金额');
-                return;
-            }
-            await donate(amount);
-        });
-    }
+    addButtonHandler('donateBtn', async (btn) => {
+        if (checkDisabled(btn, { unlocked: { title: '无法捐赠', message: '这个金库已经达成共识解锁了，不再接受捐赠。\n\n感谢您的支持！' } })) return;
+        if (!walletAddress) {
+            showModal('还没连接钱包', '请先点击右上角连接您的钱包');
+            return;
+        }
+        const amount = document.getElementById('donateAmount')?.value?.trim();
+        if (!amount || parseFloat(amount) <= 0) {
+            showModal('金额不对', '请输入有效的金额');
+            return;
+        }
+        await donate(amount);
+    });
 
     // ===== 二级市场交易 =====
     // 转移功能已移除 - 用户可在钱包或DEX(PancakeSwap等)中转移VToken
