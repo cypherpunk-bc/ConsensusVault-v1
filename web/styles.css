@@ -499,6 +499,32 @@ select option {
     border: 1px solid var(--border);
 }
 
+/* 价格和市值显示样式 */
+.price-loading {
+    color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.price-value {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.info-row .value.price-loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 0.7;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+}
+
 .vault-status,
 .status-badge {
     font-size: 12px;

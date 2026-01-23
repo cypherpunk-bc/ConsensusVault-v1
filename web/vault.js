@@ -34,18 +34,18 @@ const ERC20_EXTENDED_ABI = [
  * 钱包检测配置（按优先级排序）
  */
 const WALLET_PRIORITY = [
-    { 
-        name: 'OKX (okxwallet)', 
+    {
+        name: 'OKX (okxwallet)',
         check: () => typeof window.okxwallet !== 'undefined',
         getProvider: () => window.okxwallet
     },
-    { 
-        name: 'OKX (okexchain)', 
+    {
+        name: 'OKX (okexchain)',
         check: () => typeof window.okexchain !== 'undefined',
         getProvider: () => window.okexchain
     },
-    { 
-        name: 'OKX', 
+    {
+        name: 'OKX',
         check: () => window.ethereum?.isOKX || window.ethereum?.isOkxWallet,
         getProvider: () => window.ethereum
     },
@@ -59,18 +59,18 @@ const WALLET_PRIORITY = [
         check: () => window.ethereum?.isBinance || window.ethereum?.isBinanceWallet,
         getProvider: () => window.ethereum
     },
-    { 
-        name: 'MetaMask', 
+    {
+        name: 'MetaMask',
         check: () => window.ethereum?.isMetaMask,
         getProvider: () => window.ethereum
     },
-    { 
-        name: 'Rabby', 
+    {
+        name: 'Rabby',
         check: () => window.ethereum?.isRabby,
         getProvider: () => window.ethereum
     },
-    { 
-        name: 'Generic EIP-1193', 
+    {
+        name: 'Generic EIP-1193',
         check: () => typeof window.ethereum !== 'undefined',
         getProvider: () => window.ethereum
     },
@@ -109,6 +109,155 @@ function formatTimestamp(tsSeconds) {
     if (!tsSeconds || tsSeconds <= 0) return '未达成共识';
     const date = new Date(tsSeconds * 1000);
     return date.toLocaleString();
+}
+
+// ===== 价格查询功能（DexScreener API） =====
+// 价格缓存
+const priceCache = new Map();
+const PRICE_CACHE_TTL = 10000; // 10秒缓存（充分利用 300次/分钟的限制）
+
+/**
+ * 根据链ID获取DexScreener的chainId
+ * @param {number} chainIdDec - 链ID（十进制）
+ * @returns {string} DexScreener chainId
+ */
+function getDexScreenerChainId(chainIdDec) {
+    if (chainIdDec === 56) return 'bsc';
+    if (chainIdDec === 97) return 'bsc-testnet';
+    return 'bsc'; // 默认BSC主网
+}
+
+/**
+ * 选择最佳交易对（优先USDT，选择流动性最高的）
+ * @param {Array} pairs - 交易对数组
+ * @returns {Object|null} 最佳交易对
+ */
+function selectBestPair(pairs) {
+    if (!pairs || pairs.length === 0) return null;
+
+    // 1. 过滤出 USDT 交易对
+    const usdtPairs = pairs.filter(p => {
+        const quoteSymbol = p.quoteToken?.symbol?.toUpperCase();
+        const baseSymbol = p.baseToken?.symbol?.toUpperCase();
+        return quoteSymbol === 'USDT' || baseSymbol === 'USDT';
+    });
+
+    if (usdtPairs.length > 0) {
+        // 选择流动性最高的 USDT 交易对
+        return usdtPairs.sort((a, b) => {
+            const liquidityA = parseFloat(a.liquidity?.usd || 0);
+            const liquidityB = parseFloat(b.liquidity?.usd || 0);
+            return liquidityB - liquidityA;
+        })[0];
+    }
+
+    // 2. 如果没有 USDT，选择 BNB 交易对（需要额外转换，暂时返回null）
+    return null;
+}
+
+/**
+ * 获取代币价格（通过 DexScreener API）
+ * @param {string} tokenAddress - 代币合约地址
+ * @param {string} chainId - 链ID ('bsc' 或 'bsc-testnet')，可选，默认从CONFIG获取
+ * @returns {Promise<{price: number, change24h: number} | null>}
+ */
+async function getTokenPrice(tokenAddress, chainId = null) {
+    if (!tokenAddress) return null;
+
+    const cacheKey = tokenAddress.toLowerCase();
+    const now = Date.now();
+
+    // 检查缓存
+    if (priceCache.has(cacheKey)) {
+        const cached = priceCache.get(cacheKey);
+        if (now - cached.timestamp < PRICE_CACHE_TTL) {
+            return cached.data;
+        }
+    }
+
+    try {
+        // 确定 chainId
+        const dexChainId = chainId || getDexScreenerChainId(CONFIG.chainIdDec);
+        const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${tokenAddress}`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+
+        const response = await fetch(url, {
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            console.warn(`DexScreener API 请求失败: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        const bestPair = selectBestPair(data.pairs);
+
+        if (!bestPair || !bestPair.priceUsd) {
+            return null;
+        }
+
+        const priceData = {
+            price: parseFloat(bestPair.priceUsd),
+            change24h: bestPair.priceChange?.h24 || 0
+        };
+
+        // 更新缓存
+        priceCache.set(cacheKey, {
+            data: priceData,
+            timestamp: now
+        });
+
+        return priceData;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.warn(`获取代币价格超时: ${tokenAddress}`);
+        } else {
+            console.warn(`获取代币价格失败: ${tokenAddress}`, error);
+        }
+        return null;
+    }
+}
+
+/**
+ * 格式化货币显示
+ * @param {number} value - 数值
+ * @returns {string} 格式化的货币字符串
+ */
+function formatCurrency(value) {
+    if (isNaN(value) || value === null || value === undefined) {
+        return 'N/A';
+    }
+
+    if (value >= 1000000) {
+        return `$${(value / 1000000).toFixed(2)}M`;
+    } else if (value >= 1000) {
+        return `$${(value / 1000).toFixed(2)}K`;
+    } else if (value >= 0.01) {
+        return `$${value.toFixed(2)}`;
+    } else if (value > 0) {
+        return `$${value.toFixed(6)}`;
+    } else {
+        return '$0.00';
+    }
+}
+
+/**
+ * 计算总市值
+ * @param {string|number} totalDeposits - 总存款数量（已格式化的字符串或数字）
+ * @param {number} tokenPriceUSD - 代币 USD 价格
+ * @returns {string} 格式化的市值字符串，如 "$12,345.67"
+ */
+function calculateTotalValue(totalDeposits, tokenPriceUSD) {
+    if (!tokenPriceUSD || !totalDeposits) return 'N/A';
+    const depositsNum = parseFloat(totalDeposits);
+    if (isNaN(depositsNum) || depositsNum === 0) return '$0.00';
+    const totalValue = depositsNum * tokenPriceUSD;
+    return formatCurrency(totalValue);
 }
 
 // ===== 代币小数位数处理工具 =====
@@ -160,18 +309,18 @@ function formatTokenAmount(amount, decimals) {
     const divisor = ethers.BigNumber.from(10).pow(decimals);
     const quotient = amount.div(divisor);
     const remainder = amount.mod(divisor);
-    
+
     if (remainder.isZero()) {
         return quotient.toString();
     }
-    
+
     // 处理小数部分
     const remainderStr = remainder.toString().padStart(decimals, '0');
     const trimmed = remainderStr.replace(/0+$/, '');
     if (trimmed === '') {
         return quotient.toString();
     }
-    
+
     return `${quotient.toString()}.${trimmed}`;
 }
 
@@ -185,15 +334,15 @@ function parseTokenAmount(amount, decimals) {
     if (!amount || amount === '0') {
         return ethers.BigNumber.from(0);
     }
-    
+
     const parts = amount.split('.');
     const integerPart = parts[0] || '0';
     const decimalPart = parts[1] || '';
-    
+
     // 确保小数部分不超过代币的小数位数
     const trimmedDecimal = decimalPart.slice(0, decimals).padEnd(decimals, '0');
     const fullAmount = integerPart + trimmedDecimal;
-    
+
     return ethers.BigNumber.from(fullAmount);
 }
 
@@ -554,8 +703,8 @@ async function loadVaultDetails() {
             }
 
             // 格式化显示名称：金库名字 + 代币symbol
-            const displayName = vaultName && vaultName.trim() 
-                ? `${vaultName} ${tokenSymbol}` 
+            const displayName = vaultName && vaultName.trim()
+                ? `${vaultName} ${tokenSymbol}`
                 : tokenSymbol;
 
             const titleEl = document.getElementById('vaultTitle');
@@ -569,7 +718,7 @@ async function loadVaultDetails() {
 
         // 获取代币小数位数（如果 depositTokenAddr 为空，使用默认值18）
         const decimals = depositTokenAddr ? await getTokenDecimals(depositTokenAddr, provider) : 18;
-        
+
         const totalPrincipalNum = parseFloat(formatTokenAmount(totalPrincipal, decimals));
         const totalVoteWeightNum = parseFloat(formatTokenAmount(totalVoteWeight, decimals));
 
@@ -583,7 +732,7 @@ async function loadVaultDetails() {
 
         // 更新 UI - 确保所有元素都存在
         const elem = (id) => document.getElementById(id);
-        
+
         // 显示代币地址（在elem函数定义之后）
         if (depositTokenAddr && elem('tokenAddress')) {
             elem('tokenAddress').textContent = depositTokenAddr;
@@ -637,6 +786,33 @@ async function loadVaultDetails() {
             console.warn('读取累计捐赠失败：', e?.message || e);
             // 降级方案：如果读取失败，设置为 0
             if (elem('totalDonations')) elem('totalDonations').textContent = '0';
+        }
+
+        // 获取价格并计算总市值
+        if (depositTokenAddr) {
+            if (elem('totalMarketValue')) {
+                // 先显示加载中
+                elem('totalMarketValue').textContent = '加载中...';
+            }
+            getTokenPrice(depositTokenAddr).then(priceData => {
+                if (elem('totalMarketValue')) {
+                    if (priceData) {
+                        const totalValue = calculateTotalValue(totalPrincipalNum, priceData.price);
+                        elem('totalMarketValue').textContent = totalValue;
+                    } else {
+                        elem('totalMarketValue').textContent = 'N/A';
+                    }
+                }
+            }).catch(err => {
+                console.warn('获取价格失败:', err);
+                if (elem('totalMarketValue')) {
+                    elem('totalMarketValue').textContent = 'N/A';
+                }
+            });
+        } else {
+            if (elem('totalMarketValue')) {
+                elem('totalMarketValue').textContent = 'N/A';
+            }
         }
 
         console.log('✓ 金库详情加载完成');
@@ -709,6 +885,27 @@ async function loadUserInfo() {
             console.log('[loadUserInfo] 存款信息已更新:', depositText);
         } else {
             console.warn('[loadUserInfo] 找不到 myDeposit 元素');
+        }
+
+        // 获取价格并计算用户持仓市值
+        if (depositTokenAddr && principalNum > 0) {
+            getTokenPrice(depositTokenAddr).then(priceData => {
+                const myDepositValueEl = document.getElementById('myDepositValue');
+                if (myDepositValueEl && priceData) {
+                    const userValue = calculateTotalValue(principalNum, priceData.price);
+                    myDepositValueEl.textContent = `我的持仓市值: ${userValue}`;
+                    myDepositValueEl.style.display = 'block';
+                } else if (myDepositValueEl) {
+                    myDepositValueEl.style.display = 'none';
+                }
+            }).catch(err => {
+                console.warn('获取用户持仓市值失败:', err);
+            });
+        } else {
+            const myDepositValueEl = document.getElementById('myDepositValue');
+            if (myDepositValueEl) {
+                myDepositValueEl.style.display = 'none';
+            }
         }
 
         // 显示投票状态
@@ -1248,7 +1445,7 @@ async function vote() {
         // 检查用户是否有本金（投票权来自存款）
         const depositTokenAddr = await vault.depositToken();
         const tokenDecimals = await getTokenDecimals(depositTokenAddr, provider);
-        
+
         const userInfo = await vault.userInfo(walletAddress);
         const principal = userInfo.principal;
         const hasVoted = userInfo.hasVoted;
@@ -1378,7 +1575,7 @@ async function withdraw() {
         try {
             const depositTokenAddr = await vault.depositToken();
             const tokenDecimals = await getTokenDecimals(depositTokenAddr, provider);
-            
+
             const totalDonationsBN = await vault.totalDonations();
             const totalDonationsNum = parseFloat(formatTokenAmount(totalDonationsBN, tokenDecimals));
             const totalPrincipalBN = await vault.totalPrincipal();
@@ -1592,7 +1789,7 @@ async function getUserPrincipalAndVotes(userAddress) {
 
         const depositTokenAddr = await vault.depositToken();
         const tokenDecimals = await getTokenDecimals(depositTokenAddr, provider);
-        
+
         const userInfo = await vault.userInfo(userAddress);
         const principal = formatTokenAmount(userInfo.principal || ethers.BigNumber.from(0), tokenDecimals);
         const hasVoted = userInfo.hasVoted || false;

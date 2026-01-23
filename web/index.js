@@ -229,6 +229,281 @@ function parseTokenAmount(amount, decimals) {
     return ethers.BigNumber.from(fullAmount);
 }
 
+// ===== 价格查询功能（DexScreener API） =====
+// 价格缓存
+const priceCache = new Map();
+const PRICE_CACHE_TTL = 10000; // 10秒缓存（充分利用 300次/分钟的限制）
+const PRICE_REFRESH_INTERVAL = 30000; // 30秒自动刷新一次价格
+let priceRefreshTimer = null; // 价格自动刷新定时器
+
+/**
+ * 根据链ID获取DexScreener的chainId
+ * @param {number} chainIdDec - 链ID（十进制）
+ * @returns {string} DexScreener chainId
+ */
+function getDexScreenerChainId(chainIdDec) {
+    if (chainIdDec === 56) return 'bsc';
+    if (chainIdDec === 97) return 'bsc-testnet';
+    return 'bsc'; // 默认BSC主网
+}
+
+/**
+ * 选择最佳交易对（优先USDT，选择流动性最高的）
+ * @param {Array} pairs - 交易对数组
+ * @returns {Object|null} 最佳交易对
+ */
+function selectBestPair(pairs) {
+    if (!pairs || pairs.length === 0) return null;
+
+    // 1. 过滤出 USDT 交易对
+    const usdtPairs = pairs.filter(p => {
+        const quoteSymbol = p.quoteToken?.symbol?.toUpperCase();
+        const baseSymbol = p.baseToken?.symbol?.toUpperCase();
+        return quoteSymbol === 'USDT' || baseSymbol === 'USDT';
+    });
+
+    if (usdtPairs.length > 0) {
+        // 选择流动性最高的 USDT 交易对
+        return usdtPairs.sort((a, b) => {
+            const liquidityA = parseFloat(a.liquidity?.usd || 0);
+            const liquidityB = parseFloat(b.liquidity?.usd || 0);
+            return liquidityB - liquidityA;
+        })[0];
+    }
+
+    // 2. 如果没有 USDT，选择 BNB 交易对（需要额外转换，暂时返回null）
+    // 后续可以添加 BNB 价格转换逻辑
+    return null;
+}
+
+/**
+ * 获取代币价格（通过 DexScreener API）
+ * @param {string} tokenAddress - 代币合约地址
+ * @param {string} chainId - 链ID ('bsc' 或 'bsc-testnet')，可选，默认从CONFIG获取
+ * @returns {Promise<{price: number, change24h: number} | null>}
+ */
+async function getTokenPrice(tokenAddress, chainId = null) {
+    if (!tokenAddress) return null;
+
+    const cacheKey = tokenAddress.toLowerCase();
+    const now = Date.now();
+
+    // 检查缓存
+    if (priceCache.has(cacheKey)) {
+        const cached = priceCache.get(cacheKey);
+        if (now - cached.timestamp < PRICE_CACHE_TTL) {
+            return cached.data;
+        }
+    }
+
+    try {
+        // 确定 chainId
+        const dexChainId = chainId || getDexScreenerChainId(CONFIG.chainIdDec);
+        const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${tokenAddress}`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+
+        const response = await fetch(url, {
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            console.warn(`DexScreener API 请求失败: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        const bestPair = selectBestPair(data.pairs);
+
+        if (!bestPair || !bestPair.priceUsd) {
+            return null;
+        }
+
+        const priceData = {
+            price: parseFloat(bestPair.priceUsd),
+            change24h: bestPair.priceChange?.h24 || 0
+        };
+
+        // 更新缓存
+        priceCache.set(cacheKey, {
+            data: priceData,
+            timestamp: now
+        });
+
+        return priceData;
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.warn(`获取代币价格超时: ${tokenAddress}`);
+        } else {
+            console.warn(`获取代币价格失败: ${tokenAddress}`, error);
+        }
+        return null;
+    }
+}
+
+/**
+ * 批量获取代币价格
+ * @param {string[]} tokenAddresses - 代币地址数组
+ * @param {string} chainId - 链ID，可选
+ * @returns {Promise<Map<string, {price: number, change24h: number}>>}
+ */
+async function getTokenPricesBatch(tokenAddresses, chainId = null) {
+    const priceMap = new Map();
+    const toFetch = [];
+
+    // 过滤已缓存的地址
+    for (const addr of tokenAddresses) {
+        const cacheKey = addr.toLowerCase();
+        if (priceCache.has(cacheKey)) {
+            const cached = priceCache.get(cacheKey);
+            const now = Date.now();
+            if (now - cached.timestamp < PRICE_CACHE_TTL) {
+                priceMap.set(addr, cached.data);
+            } else {
+                toFetch.push(addr);
+            }
+        } else {
+            toFetch.push(addr);
+        }
+    }
+
+    // 批量获取价格（控制速率：300次/分钟 = 5次/秒）
+    const batchSize = 5;
+    for (let i = 0; i < toFetch.length; i += batchSize) {
+        const batch = toFetch.slice(i, i + batchSize);
+        const promises = batch.map(addr => getTokenPrice(addr, chainId));
+        const results = await Promise.all(promises);
+
+        results.forEach((priceData, index) => {
+            if (priceData) {
+                priceMap.set(batch[index], priceData);
+            }
+        });
+
+        // 如果不是最后一批，等待一下避免超过速率限制
+        if (i + batchSize < toFetch.length) {
+            await new Promise(resolve => setTimeout(resolve, 200)); // 等待200ms
+        }
+    }
+
+    return priceMap;
+}
+
+/**
+ * 刷新所有金库的价格
+ */
+async function refreshAllVaultPrices() {
+    if (!allVaults || allVaults.length === 0) return;
+
+    const uniqueTokenAddresses = [...new Set(allVaults.map(v => v.depositToken).filter(Boolean))];
+    if (uniqueTokenAddresses.length === 0) return;
+
+    console.log(`[自动刷新] 开始刷新 ${uniqueTokenAddresses.length} 个代币的价格...`);
+
+    try {
+        // 清除这些代币的缓存，强制重新获取
+        uniqueTokenAddresses.forEach(addr => {
+            priceCache.delete(addr.toLowerCase());
+        });
+
+        const priceMap = await getTokenPricesBatch(uniqueTokenAddresses);
+
+        // 更新所有金库的价格数据
+        allVaults.forEach(vault => {
+            if (vault.depositToken && priceMap.has(vault.depositToken)) {
+                vault.priceData = priceMap.get(vault.depositToken);
+
+                // 更新页面上的显示
+                const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+                if (valueEl) {
+                    const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                    const valueSpan = valueEl.querySelector('.value');
+                    if (valueSpan) {
+                        valueSpan.textContent = totalValue;
+                    }
+                }
+            }
+        });
+
+        console.log(`[自动刷新] ✓ 价格刷新完成`);
+    } catch (error) {
+        console.warn('[自动刷新] 价格刷新失败:', error);
+    }
+}
+
+/**
+ * 启动价格自动刷新定时器
+ */
+function startPriceAutoRefresh() {
+    // 清除旧的定时器
+    if (priceRefreshTimer) {
+        clearInterval(priceRefreshTimer);
+    }
+
+    // 每30秒自动刷新一次价格
+    priceRefreshTimer = setInterval(() => {
+        refreshAllVaultPrices();
+    }, PRICE_REFRESH_INTERVAL);
+
+    console.log(`[价格刷新] 已启动自动刷新，每 ${PRICE_REFRESH_INTERVAL / 1000} 秒刷新一次`);
+}
+
+/**
+ * 停止价格自动刷新定时器
+ */
+function stopPriceAutoRefresh() {
+    if (priceRefreshTimer) {
+        clearInterval(priceRefreshTimer);
+        priceRefreshTimer = null;
+        console.log('[价格刷新] 已停止自动刷新');
+    }
+}
+
+// 页面卸载时清理定时器
+window.addEventListener('beforeunload', () => {
+    stopPriceAutoRefresh();
+});
+
+/**
+ * 格式化货币显示
+ * @param {number} value - 数值
+ * @returns {string} 格式化的货币字符串
+ */
+function formatCurrency(value) {
+    if (isNaN(value) || value === null || value === undefined) {
+        return 'N/A';
+    }
+
+    if (value >= 1000000) {
+        return `$${(value / 1000000).toFixed(2)}M`;
+    } else if (value >= 1000) {
+        return `$${(value / 1000).toFixed(2)}K`;
+    } else if (value >= 0.01) {
+        return `$${value.toFixed(2)}`;
+    } else if (value > 0) {
+        return `$${value.toFixed(6)}`;
+    } else {
+        return '$0.00';
+    }
+}
+
+/**
+ * 计算总市值
+ * @param {string|number} totalDeposits - 总存款数量（已格式化的字符串或数字）
+ * @param {number} tokenPriceUSD - 代币 USD 价格
+ * @returns {string} 格式化的市值字符串，如 "$12,345.67"
+ */
+function calculateTotalValue(totalDeposits, tokenPriceUSD) {
+    if (!tokenPriceUSD || !totalDeposits) return 'N/A';
+    const depositsNum = parseFloat(totalDeposits);
+    if (isNaN(depositsNum) || depositsNum === 0) return '$0.00';
+    const totalValue = depositsNum * tokenPriceUSD;
+    return formatCurrency(totalValue);
+}
+
 // ===== VaultManager 类 - 合约交互管理 =====
 class VaultManager {
     constructor(factoryAddress, provider) {
@@ -838,6 +1113,23 @@ async function loadAllVaults() {
         const loadTime = Date.now() - startTime;
         console.log(`✓ 并行加载完成，共 ${allVaults.length} 个金库，耗时 ${loadTime}ms`);
 
+        // 批量获取所有代币价格（优化性能）
+        const uniqueTokenAddresses = [...new Set(allVaults.map(v => v.depositToken).filter(Boolean))];
+        if (uniqueTokenAddresses.length > 0) {
+            console.log(`开始批量获取 ${uniqueTokenAddresses.length} 个代币的价格...`);
+            const priceMap = await getTokenPricesBatch(uniqueTokenAddresses);
+            // 将价格数据添加到金库对象中
+            allVaults.forEach(vault => {
+                if (vault.depositToken && priceMap.has(vault.depositToken)) {
+                    vault.priceData = priceMap.get(vault.depositToken);
+                }
+            });
+            console.log(`✓ 价格加载完成`);
+        }
+
+        // 启动价格自动刷新（每30秒刷新一次）
+        startPriceAutoRefresh();
+
         // 初始化无限滚动
         filteredVaults = sortVaults(allVaults, currentSort);
         currentPage = 0;
@@ -895,6 +1187,7 @@ async function loadUserVaults() {
                         const decimals = details ? (details.tokenDecimals || 18) : 18;
                         return {
                             address: vaultAddr,
+                            depositToken: details ? details.depositToken : null,
                             depositAmount: formatTokenAmount(principal, decimals),
                             consensusReached: details ? details.consensusReached : false,
                             tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
@@ -978,6 +1271,10 @@ function renderUserVaults() {
                     <span class="label">我的存款</span>
                     <span class="value">${parseFloat(vault.depositAmount).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
                 </div>
+                <div class="info-row" id="user-vault-value-${vault.address}">
+                    <span class="label">持仓市值</span>
+                    <span class="value price-loading">加载中...</span>
+                </div>
                 <div class="info-row">
                     <span class="label">金库地址</span> 
                     <span class="value" style="font-family: monospace; font-size: 12px;">${vault.address.slice(0, 10)}...${vault.address.slice(-8)}</span>
@@ -989,6 +1286,28 @@ function renderUserVaults() {
                 </button>
             </div>
         `;
+
+        // 异步加载价格并更新持仓市值
+        if (vault.depositToken) {
+            getTokenPrice(vault.depositToken).then(priceData => {
+                const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
+                if (valueEl && priceData) {
+                    const userValue = calculateTotalValue(vault.depositAmount, priceData.price);
+                    valueEl.querySelector('.value').textContent = userValue;
+                    valueEl.querySelector('.value').classList.remove('price-loading');
+                } else if (valueEl) {
+                    valueEl.querySelector('.value').textContent = 'N/A';
+                    valueEl.querySelector('.value').classList.remove('price-loading');
+                }
+            }).catch(err => {
+                const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
+                if (valueEl) {
+                    valueEl.querySelector('.value').textContent = 'N/A';
+                    valueEl.querySelector('.value').classList.remove('price-loading');
+                }
+            });
+        }
+
         grid.appendChild(card);
     });
 }
@@ -1509,6 +1828,10 @@ function createVaultCard(vault) {
                 <span class="label">总存款</span>
                 <span class="value">${parseFloat(vault.totalDepositsFormatted).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
             </div>
+            <div class="info-row" id="vault-total-value-${vault.address}">
+                <span class="label">总市值</span>
+                <span class="value price-loading">加载中...</span>
+            </div>
             <div class="info-row">
                 <span class="label">赞成票</span>
                 <span class="value">${parseFloat(vault.totalYesVotesFormatted).toFixed(4)}</span>
@@ -1524,6 +1847,61 @@ function createVaultCard(vault) {
             </button>
         </div>
     `;
+
+    // 更新总市值（优先使用已加载的价格数据）
+    // 如果已有价格数据，立即更新；否则异步加载
+    if (vault.priceData) {
+        // 使用已加载的价格数据，使用 setTimeout 确保 DOM 已更新
+        setTimeout(() => {
+            const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+            if (valueEl) {
+                const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                const valueSpan = valueEl.querySelector('.value');
+                if (valueSpan) {
+                    valueSpan.textContent = totalValue;
+                    valueSpan.classList.remove('price-loading');
+                }
+            }
+        }, 0);
+    } else if (vault.depositToken) {
+        // 如果没有价格数据，异步加载
+        setTimeout(() => {
+            const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+            if (!valueEl) return;
+
+            getTokenPrice(vault.depositToken).then(priceData => {
+                const valueSpan = valueEl.querySelector('.value');
+                if (valueSpan) {
+                    if (priceData) {
+                        const totalValue = calculateTotalValue(vault.totalDepositsFormatted, priceData.price);
+                        valueSpan.textContent = totalValue;
+                    } else {
+                        valueSpan.textContent = 'N/A';
+                    }
+                    valueSpan.classList.remove('price-loading');
+                }
+            }).catch(err => {
+                console.warn(`获取金库 ${vault.address} 价格失败:`, err);
+                const valueSpan = valueEl.querySelector('.value');
+                if (valueSpan) {
+                    valueSpan.textContent = 'N/A';
+                    valueSpan.classList.remove('price-loading');
+                }
+            });
+        }, 0);
+    } else {
+        // 没有代币地址，直接显示 N/A
+        setTimeout(() => {
+            const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+            if (valueEl) {
+                const valueSpan = valueEl.querySelector('.value');
+                if (valueSpan) {
+                    valueSpan.textContent = 'N/A';
+                    valueSpan.classList.remove('price-loading');
+                }
+            }
+        }, 0);
+    }
 
     return div;
 }
