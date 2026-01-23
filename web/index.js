@@ -19,13 +19,40 @@
 const CONFIG = {
     chainId: '0x61',
     chainIdDec: 97,
-    rpcUrl: 'https://bsc-testnet.infura.io/v3/ccd622a8b114465aa32b55baa75efc35',
+    rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545', // 币安官方 BSC Testnet 节点（更快）
     explorer: 'https://testnet.bscscan.com'
 };
 
 
 // 工厂合约地址（部署后替换）
 const VAULT_FACTORY_ADDRESS = '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98';
+
+// Multicall3 合约地址（所有链通用）
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+
+// Multicall3 ABI（简化版，只包含 aggregate 函数）
+const MULTICALL3_ABI = [
+    {
+        "inputs": [
+            {
+                "components": [
+                    { "internalType": "address", "name": "target", "type": "address" },
+                    { "internalType": "bytes", "name": "callData", "type": "bytes" }
+                ],
+                "internalType": "struct IMulticall3.Call[]",
+                "name": "calls",
+                "type": "tuple[]"
+            }
+        ],
+        "name": "aggregate",
+        "outputs": [
+            { "internalType": "uint256", "name": "blockNumber", "type": "uint256" },
+            { "internalType": "bytes[]", "name": "returnData", "type": "bytes[]" }
+        ],
+        "stateMutability": "payable",
+        "type": "function"
+    }
+];
 
 // 导入 ABI
 let VAULT_FACTORY_ABI = [];
@@ -302,7 +329,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
         const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${tokenAddress}`;
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时（DexScreener API 可能较慢）
 
         const response = await fetch(url, {
             signal: controller.signal
@@ -532,67 +559,6 @@ class VaultManager {
             return await this.factoryContract.vaults(index);
         } catch (e) {
             console.error(`获取第 ${index} 个金库失败:`, e);
-            return null;
-        }
-    }
-
-    async getVaultDetails(vaultAddress) {
-        try {
-            const vault = new ethers.Contract(
-                vaultAddress,
-                CONSENSUS_VAULT_ABI,
-                this.provider
-            );
-
-            const depositTokenAddr = await vault.depositToken();
-            let tokenSymbol = 'TOKEN';
-            let tokenDecimals = 18; // 默认18位小数
-
-            // 获取 depositToken 的符号和小数位数
-            try {
-                const tokenAbi = ['function symbol() view returns (string)', 'function decimals() view returns (uint8)'];
-                const depositToken = new ethers.Contract(depositTokenAddr, tokenAbi, this.provider);
-                tokenSymbol = await depositToken.symbol();
-                tokenDecimals = await depositToken.decimals();
-            } catch (e) {
-                console.warn(`获取代币信息失败: ${e.message}`);
-                tokenSymbol = 'TOKEN';
-                tokenDecimals = 18;
-            }
-
-            // 获取自定义金库名称
-            let vaultName = '';
-            try {
-                vaultName = await vault.name();
-            } catch (e) {
-                console.warn(`获取金库名称失败: ${e.message}`);
-            }
-
-            return {
-                depositToken: depositTokenAddr,
-                totalDeposits: await vault.totalPrincipal(),
-                totalYesVotes: await vault.totalVoteWeight(),
-                consensusReached: await vault.consensusReached(),
-                tokenSymbol: tokenSymbol,
-                tokenDecimals: tokenDecimals, // 添加小数位数
-                vaultName: vaultName || '' // 自定义名称，如果为空则前端会用 tokenSymbol
-            };
-        } catch (e) {
-            console.error(`获取金库详情失败 ${vaultAddress}:`, e);
-            return null;
-        }
-    }
-
-    async getUserVaultInfo(vaultAddress, userAddress) {
-        try {
-            const vault = new ethers.Contract(
-                vaultAddress,
-                CONSENSUS_VAULT_ABI,
-                this.provider
-            );
-            return await vault.userInfo(userAddress);
-        } catch (e) {
-            console.error('获取用户金库信息失败:', e);
             return null;
         }
     }
@@ -892,24 +858,26 @@ async function init() {
         // 1. 加载 ABI
         await loadABIs();
 
-        // 2. 初始化 provider（使用测试网配置）
-        // 第一次调用时显示日志，后续使用缓存
+        // 2. 初始化只读 provider：固定使用币安官方 RPC（不依赖钱包网络，解决 Binance 钱包问题）
+        provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
+        console.log('✓ 使用固定 RPC 进行只读操作:', CONFIG.rpcUrl);
+
+        // 3. 初始化管理器（只读，始终用固定 RPC provider）
+        vaultManager = new VaultManager(VAULT_FACTORY_ADDRESS, provider);
+
         const walletProvider = getWalletProvider(false, false);
         if (walletProvider) {
-            provider = new ethers.providers.Web3Provider(walletProvider, 'any');
             console.log('当前域名:', window.location.origin);
             console.log('当前协议:', window.location.protocol);
-        } else {
-            provider = new ethers.providers.JsonRpcProvider(CONFIG.rpcUrl);
         }
-
-        // 3. 初始化管理器
-        vaultManager = new VaultManager(VAULT_FACTORY_ADDRESS, provider);
 
         // 4. 设置事件监听器
         setupEventListeners();
 
-        // 5. 尝试自动连接钱包（使用上面已声明的 walletProvider）
+        // 5. 先加载所有金库数据（这样 connectWallet() 中的 loadUserVaults() 可以直接使用已加载的数据）
+        await loadAllVaults();
+
+        // 6. 尝试自动连接钱包（使用上面已声明的 walletProvider）
         if (walletProvider) {
             try {
                 const accounts = await walletProvider.request({ method: 'eth_accounts' });
@@ -922,9 +890,6 @@ async function init() {
         } else {
             console.warn('未检测到钱包，使用只读模式');
         }
-
-        // 6. 加载初始数据
-        await loadAllVaults();
 
     } catch (error) {
         console.error('初始化错误:', error);
@@ -1012,15 +977,27 @@ async function connectWallet() {
             }
         }
 
-        // 网络切换后，重新初始化 provider 和 signer
-        provider = new ethers.providers.Web3Provider(walletProvider, 'any');
-        signer = provider.getSigner();
-        vaultManager = new VaultManager(VAULT_FACTORY_ADDRESS, provider);
+        // 网络切换后，更新 signer 和 provider
+        // 如果网络正确，使用钱包 RPC（更快）；否则保持使用固定 RPC
+        const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+        signer = web3Provider.getSigner();
+
+        // 检查钱包网络是否匹配（如果不匹配，提示用户只能查看不能操作）
+        // 注意：provider 保持不变，始终使用固定 RPC 做只读，解决 Binance 钱包问题
+        try {
+            const chainId = await walletProvider.request({ method: 'eth_chainId' });
+            if (chainId !== CONFIG.chainId) {
+                console.warn('⚠ 钱包网络不匹配，只能查看，不能进行链上操作');
+                showModal('网络不匹配', `当前钱包网络与 BSC Testnet 不匹配，您只能查看数据，无法进行存款、提现等操作。`);
+            }
+        } catch (e) {
+            console.warn('检查钱包网络失败:', e);
+        }
 
         updateUI();
 
-        // 加载用户参与的金库
-        await loadUserVaults();
+        // 连接钱包后刷新“我的金库”（只读依然走 RPC）
+        loadUserVaults();
 
     } catch (error) {
         console.error('连接钱包失败:', error);
@@ -1045,86 +1022,241 @@ async function connectWallet() {
     }
 }
 
+/**
+ * 获取所有金库地址（公共函数，避免重复代码）
+ * @param {number} maxLimit - 最大加载数量，默认100
+ * @returns {Promise<string[]>} 金库地址数组
+ */
+async function getAllVaultAddresses(maxLimit = 100) {
+    const factoryContract = new ethers.Contract(
+        VAULT_FACTORY_ADDRESS,
+        VAULT_FACTORY_ABI,
+        provider
+    );
+    vaultManager.setFactoryContract(factoryContract);
+
+    try {
+        const addresses = await factoryContract.getVaults();
+        console.log(`✓ 获取到 ${addresses.length} 个金库地址`);
+        return addresses.slice(0, maxLimit);
+    } catch (error) {
+        console.warn('Factory.getVaults() 失败，回退到逐个获取:', error);
+        const countBN = await vaultManager.getFactoryVaultCount();
+        const count = parseInt(countBN.toString());
+        const loadLimit = Math.min(count, maxLimit);
+        const promises = [];
+        for (let i = 0; i < loadLimit; i++) {
+            promises.push(vaultManager.getVaultAddress(i).catch(() => null));
+        }
+        return (await Promise.all(promises)).filter(Boolean);
+    }
+}
+
+/**
+ * 将用户信息格式化为用户金库数据（公共函数，避免重复代码）
+ * @param {Array} vaults - 包含 userInfo 的金库数组
+ * @returns {Array} 格式化后的用户金库列表
+ */
+function formatUserVaults(vaults) {
+    return vaults
+        .filter(vault => vault.userInfo && vault.userInfo.principal && vault.userInfo.principal.gt(0))
+        .map(vault => {
+            const decimals = vault.tokenDecimals || 18;
+            return {
+                address: vault.address,
+                depositToken: vault.depositToken,
+                depositAmount: formatTokenAmount(vault.userInfo.principal, decimals),
+                consensusReached: vault.consensusReached,
+                tokenSymbol: vault.tokenSymbol,
+                vaultName: vault.vaultName,
+                displayName: vault.displayName
+            };
+        });
+}
+
 async function loadAllVaults() {
     try {
         if (!VAULT_FACTORY_ABI.length) return;
 
-        const factoryContract = new ethers.Contract(
-            VAULT_FACTORY_ADDRESS,
-            VAULT_FACTORY_ABI,
-            provider
-        );
-        vaultManager.setFactoryContract(factoryContract);
-
-        const countBN = await vaultManager.getFactoryVaultCount();
-        const count = parseInt(countBN.toString());
-
-        allVaults = [];
-        const loadLimit = Math.min(count, 50);
-
-        console.log(`开始并行加载 ${loadLimit} 个金库...`);
+        console.log('🚀 使用 Multicall 批量加载金库...');
         const startTime = Date.now();
 
-        // 并行获取所有金库地址
-        const vaultAddressPromises = [];
-        for (let i = 0; i < loadLimit; i++) {
-            vaultAddressPromises.push(
-                vaultManager.getVaultAddress(i).then(addr => ({ index: i, address: addr }))
-                    .catch(err => {
-                        console.warn(`获取第 ${i} 个金库地址失败:`, err.message);
-                        return { index: i, address: null };
-                    })
-            );
+        // 1. 获取所有金库地址
+        const vaultAddresses = await getAllVaultAddresses(100);
+
+        if (vaultAddresses.length === 0) {
+            allVaults = [];
+            filteredVaults = [];
+            currentPage = 0;
+            loadMoreVaults();
+            return;
         }
 
-        const vaultAddresses = await Promise.all(vaultAddressPromises);
-        console.log(`已获取 ${vaultAddresses.filter(v => v.address).length} 个金库地址`);
+        // 2. 使用 Multicall 批量获取所有金库详情
+        const multicallContract = new ethers.Contract(
+            MULTICALL3_ADDRESS,
+            MULTICALL3_ABI,
+            provider
+        );
+        const vaultInterface = new ethers.utils.Interface(CONSENSUS_VAULT_ABI);
 
-        // 并行获取所有金库详情
-        const vaultDetailPromises = vaultAddresses
-            .filter(item => item.address)
-            .map(item =>
-                vaultManager.getVaultDetails(item.address)
-                    .then(details => {
-                        if (!details) return null;
-                        const decimals = details.tokenDecimals || 18;
-                        return {
-                            address: item.address,
-                            ...details,
-                            blockNumber: item.index,
-                            totalDepositsFormatted: formatTokenAmount(details.totalDeposits, decimals),
-                            totalYesVotesFormatted: formatTokenAmount(details.totalYesVotes, decimals),
-                            tokenSymbol: details.tokenSymbol || 'TOKEN',
-                            vaultName: details.vaultName || '',
-                            displayName: details.vaultName && details.vaultName.trim()
-                                ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
-                                : (details.tokenSymbol || 'TOKEN')
-                        };
-                    })
-                    .catch(err => {
-                        console.warn(`加载金库 ${item.address} 详情失败:`, err.message);
-                        return null;
-                    })
-            );
+        const calls = [];
+        const CALLS_PER_VAULT = 7;
 
-        const vaultDetails = await Promise.all(vaultDetailPromises);
-        allVaults = vaultDetails.filter(v => v !== null);
+        vaultAddresses.forEach(addr => {
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('depositToken') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('name') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('totalPrincipal') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('totalVoteWeight') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('consensusReached') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('unlockAt') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('participantCount') });
+        });
+
+        console.log(`📡 通过 Multicall 批量查询 ${vaultAddresses.length} 个金库的金库详情（${calls.length} 次调用）...`);
+        const [blockNumber, returnData] = await multicallContract.callStatic.aggregate(calls);
+
+        // 3. 解码金库数据
+        const vaultDetails = [];
+        const tokenAddresses = new Set();
+
+        for (let i = 0; i < vaultAddresses.length; i++) {
+            try {
+                const baseIndex = i * CALLS_PER_VAULT;
+                const depositToken = vaultInterface.decodeFunctionResult('depositToken()', returnData[baseIndex])[0];
+                const name = vaultInterface.decodeFunctionResult('name()', returnData[baseIndex + 1])[0];
+                const totalPrincipal = vaultInterface.decodeFunctionResult('totalPrincipal()', returnData[baseIndex + 2])[0];
+                const totalVoteWeight = vaultInterface.decodeFunctionResult('totalVoteWeight()', returnData[baseIndex + 3])[0];
+                const consensusReached = vaultInterface.decodeFunctionResult('consensusReached()', returnData[baseIndex + 4])[0];
+                const unlockAt = vaultInterface.decodeFunctionResult('unlockAt()', returnData[baseIndex + 5])[0];
+                const participantCount = vaultInterface.decodeFunctionResult('participantCount()', returnData[baseIndex + 6])[0];
+
+                vaultDetails.push({
+                    address: vaultAddresses[i],
+                    depositToken,
+                    totalDeposits: totalPrincipal,
+                    totalYesVotes: totalVoteWeight,
+                    consensusReached,
+                    unlockAt,
+                    participantCount,
+                    vaultName: name,
+                    blockNumber: i
+                });
+
+                if (depositToken && depositToken !== ethers.constants.AddressZero) {
+                    tokenAddresses.add(depositToken);
+                }
+            } catch (err) {
+                console.warn(`解码金库 ${vaultAddresses[i]} 数据失败:`, err);
+            }
+        }
+
+        console.log(`✓ Multicall 查询完成，成功获取 ${vaultDetails.length} 个金库详情`);
+
+        // 4. 批量获取代币信息（symbol, decimals）
+        const tokenInfoMap = new Map();
+        if (tokenAddresses.size > 0) {
+            const tokenCalls = [];
+            const tokenAddressArray = Array.from(tokenAddresses);
+            const tokenInterface = new ethers.utils.Interface([
+                'function symbol() view returns (string)',
+                'function decimals() view returns (uint8)'
+            ]);
+
+            tokenAddressArray.forEach(addr => {
+                tokenCalls.push({
+                    target: addr,
+                    callData: tokenInterface.encodeFunctionData('symbol')
+                });
+                tokenCalls.push({
+                    target: addr,
+                    callData: tokenInterface.encodeFunctionData('decimals')
+                });
+            });
+
+            try {
+                // 使用 callStatic 来调用 aggregate，因为它是只读操作，不需要 signer
+                const [, tokenReturnData] = await multicallContract.callStatic.aggregate(tokenCalls);
+
+                // 解码代币信息
+                for (let i = 0; i < tokenAddressArray.length; i++) {
+                    const addr = tokenAddressArray[i];
+                    try {
+                        const symbolResult = tokenInterface.decodeFunctionResult('symbol()', tokenReturnData[i * 2]);
+                        const decimalsResult = tokenInterface.decodeFunctionResult('decimals()', tokenReturnData[i * 2 + 1]);
+                        // decodeFunctionResult 返回数组，取第一个元素
+                        const symbol = symbolResult[0];
+                        const decimals = parseInt(decimalsResult[0].toString());
+                        tokenInfoMap.set(addr, {
+                            symbol: symbol,
+                            decimals: decimals
+                        });
+                    } catch (err) {
+                        console.warn(`解码代币 ${addr} 信息失败:`, err);
+                        tokenInfoMap.set(addr, { symbol: 'TOKEN', decimals: 18 });
+                    }
+                }
+            } catch (err) {
+                console.warn('批量获取代币信息失败，使用默认值:', err);
+                tokenAddressArray.forEach(addr => {
+                    tokenInfoMap.set(addr, { symbol: 'TOKEN', decimals: 18 });
+                });
+            }
+        }
+
+        // 5. 格式化并组装最终数据
+        allVaults = vaultDetails.map(vault => {
+            const tokenInfo = tokenInfoMap.get(vault.depositToken) || { symbol: 'TOKEN', decimals: 18 };
+            const decimals = tokenInfo.decimals;
+
+            return {
+                address: vault.address,
+                depositToken: vault.depositToken,
+                totalDeposits: vault.totalDeposits,
+                totalYesVotes: vault.totalYesVotes,
+                consensusReached: vault.consensusReached,
+                unlockAt: vault.unlockAt,
+                participantCount: vault.participantCount,
+                vaultName: vault.vaultName || '',
+                tokenSymbol: tokenInfo.symbol,
+                tokenDecimals: decimals,
+                blockNumber: vault.blockNumber,
+                totalDepositsFormatted: formatTokenAmount(vault.totalDeposits, decimals),
+                totalYesVotesFormatted: formatTokenAmount(vault.totalYesVotes, decimals),
+                displayName: vault.vaultName && vault.vaultName.trim()
+                    ? `${vault.vaultName} ${tokenInfo.symbol}`
+                    : tokenInfo.symbol
+            };
+        });
 
         const loadTime = Date.now() - startTime;
-        console.log(`✓ 并行加载完成，共 ${allVaults.length} 个金库，耗时 ${loadTime}ms`);
+        console.log(`✓ Multicall 加载完成，共 ${allVaults.length} 个金库，耗时 ${loadTime}ms`);
 
-        // 批量获取所有代币价格（优化性能）
+        // 6. 异步批量获取代币价格（不阻塞主流程，提升首屏速度）
         const uniqueTokenAddresses = [...new Set(allVaults.map(v => v.depositToken).filter(Boolean))];
         if (uniqueTokenAddresses.length > 0) {
-            console.log(`开始批量获取 ${uniqueTokenAddresses.length} 个代币的价格...`);
-            const priceMap = await getTokenPricesBatch(uniqueTokenAddresses);
-            // 将价格数据添加到金库对象中
-            allVaults.forEach(vault => {
-                if (vault.depositToken && priceMap.has(vault.depositToken)) {
-                    vault.priceData = priceMap.get(vault.depositToken);
-                }
+            console.log(`开始异步批量获取 ${uniqueTokenAddresses.length} 个代币的价格...`);
+            // 异步执行，不阻塞渲染
+            getTokenPricesBatch(uniqueTokenAddresses).then(priceMap => {
+                allVaults.forEach(vault => {
+                    if (vault.depositToken && priceMap.has(vault.depositToken)) {
+                        vault.priceData = priceMap.get(vault.depositToken);
+                        // 更新页面上已渲染的金库卡片
+                        const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+                        if (valueEl) {
+                            const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                            const valueSpan = valueEl.querySelector('.value');
+                            if (valueSpan) {
+                                valueSpan.textContent = totalValue;
+                                valueSpan.classList.remove('price-loading');
+                            }
+                        }
+                    }
+                });
+                console.log(`✓ 价格加载完成`);
+            }).catch(err => {
+                console.warn('价格加载失败:', err);
             });
-            console.log(`✓ 价格加载完成`);
         }
 
         // 启动价格自动刷新（每30秒刷新一次）
@@ -1144,72 +1276,52 @@ async function loadAllVaults() {
 async function loadUserVaults() {
     if (!walletAddress) return;
 
+    if (!allVaults || allVaults.length === 0) {
+        await loadAllVaults();
+    }
+
     try {
-        userCache.participatedVaults = [];
-
-        const factoryContract = new ethers.Contract(
-            VAULT_FACTORY_ADDRESS,
-            VAULT_FACTORY_ABI,
-            provider
-        );
-        vaultManager.setFactoryContract(factoryContract);
-
-        const count = await vaultManager.getFactoryVaultCount();
-
-        console.log(`开始并行加载用户参与的 ${count} 个金库...`);
+        console.log('🚀 使用 Multicall 批量加载用户参与的金库...');
         const startTime = Date.now();
 
-        // 并行获取所有金库地址
-        const vaultAddressPromises = [];
-        for (let i = 0; i < count; i++) {
-            vaultAddressPromises.push(
-                vaultManager.getVaultAddress(i)
-                    .catch(err => {
-                        console.warn(`获取第 ${i} 个金库地址失败:`, err.message);
-                        return null;
-                    })
-            );
+        const vaultAddresses = allVaults.map(v => v.address);
+        if (vaultAddresses.length === 0) {
+            userCache.participatedVaults = [];
+            renderUserVaults();
+            return;
         }
 
-        const vaultAddresses = await Promise.all(vaultAddressPromises);
-        const validAddresses = vaultAddresses.filter(addr => addr);
-        console.log(`已获取 ${validAddresses.length} 个有效金库地址`);
+        const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
+        const vaultInterface = new ethers.utils.Interface(CONSENSUS_VAULT_ABI);
 
-        // 并行检查用户信息和获取金库详情
-        const userVaultPromises = validAddresses.map(vaultAddr =>
-            Promise.all([
-                vaultManager.getUserVaultInfo(vaultAddr, walletAddress),
-                vaultManager.getVaultDetails(vaultAddr)
-            ])
-                .then(([userInfo, details]) => {
-                    const principal = userInfo ? (userInfo.principal || userInfo[0]) : null;
-                    if (principal && principal.gt(0)) {
-                        const decimals = details ? (details.tokenDecimals || 18) : 18;
-                        return {
-                            address: vaultAddr,
-                            depositToken: details ? details.depositToken : null,
-                            depositAmount: formatTokenAmount(principal, decimals),
-                            consensusReached: details ? details.consensusReached : false,
-                            tokenSymbol: details ? details.tokenSymbol : 'TOKEN',
-                            vaultName: details ? (details.vaultName || '') : '',
-                            displayName: details && details.vaultName && details.vaultName.trim()
-                                ? `${details.vaultName} ${details.tokenSymbol || 'TOKEN'}`
-                                : (details ? details.tokenSymbol : 'TOKEN')
-                        };
-                    }
-                    return null;
-                })
-                .catch(err => {
-                    console.warn(`加载用户金库 ${vaultAddr} 信息失败:`, err.message);
-                    return null;
-                })
-        );
+        const calls = vaultAddresses.map(addr => ({
+            target: addr,
+            callData: vaultInterface.encodeFunctionData('userInfo', [walletAddress])
+        }));
 
-        const userVaults = await Promise.all(userVaultPromises);
-        userCache.participatedVaults = userVaults.filter(v => v !== null);
+        console.log(`📡 通过 Multicall 批量查询 ${vaultAddresses.length} 个金库的用户信息...`);
+        const [, returnData] = await multicallContract.callStatic.aggregate(calls);
+
+        // 解码用户信息并附加到 allVaults
+        for (let i = 0; i < vaultAddresses.length; i++) {
+            try {
+                const userInfoResult = vaultInterface.decodeFunctionResult('userInfo(address)', returnData[i]);
+                allVaults[i].userInfo = {
+                    principal: userInfoResult[0],
+                    rewardDebt: userInfoResult[1],
+                    hasVoted: userInfoResult[2]
+                };
+            } catch (err) {
+                console.warn(`解码用户信息失败 ${vaultAddresses[i]}:`, err);
+                allVaults[i].userInfo = undefined;
+            }
+        }
+
+        // 格式化用户金库列表
+        userCache.participatedVaults = formatUserVaults(allVaults);
 
         const loadTime = Date.now() - startTime;
-        console.log(`✓ 用户金库加载完成，共 ${userCache.participatedVaults.length} 个，耗时 ${loadTime}ms`);
+        console.log(`✓ Multicall 用户金库加载完成，共 ${userCache.participatedVaults.length} 个，耗时 ${loadTime}ms`);
 
         renderUserVaults();
     } catch (error) {
@@ -1287,25 +1399,56 @@ function renderUserVaults() {
             </div>
         `;
 
-        // 异步加载价格并更新持仓市值
+        // 异步加载价格并更新持仓市值（优先使用已加载的价格数据）
         if (vault.depositToken) {
-            getTokenPrice(vault.depositToken).then(priceData => {
-                const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
-                if (valueEl && priceData) {
-                    const userValue = calculateTotalValue(vault.depositAmount, priceData.price);
-                    valueEl.querySelector('.value').textContent = userValue;
-                    valueEl.querySelector('.value').classList.remove('price-loading');
-                } else if (valueEl) {
-                    valueEl.querySelector('.value').textContent = 'N/A';
-                    valueEl.querySelector('.value').classList.remove('price-loading');
-                }
-            }).catch(err => {
+            // 先检查是否已经有价格数据（从 allVaults 中获取）
+            const allVault = allVaults.find(v => v.address === vault.address);
+            if (allVault && allVault.priceData) {
+                const userValue = calculateTotalValue(vault.depositAmount, allVault.priceData.price);
                 const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
                 if (valueEl) {
-                    valueEl.querySelector('.value').textContent = 'N/A';
+                    valueEl.querySelector('.value').textContent = userValue;
                     valueEl.querySelector('.value').classList.remove('price-loading');
                 }
-            });
+            } else {
+                // 如果没有，再单独请求（延迟 3 秒，等待批量加载）
+                setTimeout(() => {
+                    // 再次检查（批量加载可能已完成）
+                    const allVault = allVaults.find(v => v.address === vault.address);
+                    if (allVault && allVault.priceData) {
+                        const userValue = calculateTotalValue(vault.depositAmount, allVault.priceData.price);
+                        const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
+                        if (valueEl) {
+                            valueEl.querySelector('.value').textContent = userValue;
+                            valueEl.querySelector('.value').classList.remove('price-loading');
+                        }
+                        return;
+                    }
+
+                    // 如果还没有，再单独请求（作为兜底）
+                    getTokenPrice(vault.depositToken).then(priceData => {
+                        const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
+                        if (valueEl && priceData) {
+                            // 同时更新 allVaults 中的价格数据
+                            if (allVault) {
+                                allVault.priceData = priceData;
+                            }
+                            const userValue = calculateTotalValue(vault.depositAmount, priceData.price);
+                            valueEl.querySelector('.value').textContent = userValue;
+                            valueEl.querySelector('.value').classList.remove('price-loading');
+                        } else if (valueEl) {
+                            valueEl.querySelector('.value').textContent = 'N/A';
+                            valueEl.querySelector('.value').classList.remove('price-loading');
+                        }
+                    }).catch(err => {
+                        const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
+                        if (valueEl) {
+                            valueEl.querySelector('.value').textContent = 'N/A';
+                            valueEl.querySelector('.value').classList.remove('price-loading');
+                        }
+                    });
+                }, 3000);
+            }
         }
 
         grid.appendChild(card);
@@ -1497,13 +1640,14 @@ function setupEventListeners() {
                 signer = null;
                 userCache.participatedVaults = [];
                 updateUI();
+                renderUserVaults();
             } else {
+                // 重新连接钱包（只更新 signer，不改变 provider）
                 walletAddress = accounts[0];
-                if (provider) {
-                    signer = provider.getSigner();
-                }
+                const web3Provider = new ethers.providers.Web3Provider(walletProvider, 'any');
+                signer = web3Provider.getSigner();
                 updateUI();
-                // 刷新“我的金库”列表
+                // 刷新"我的金库"列表（只读依然走固定 RPC）
                 loadUserVaults();
             }
         });
@@ -1891,15 +2035,29 @@ function createVaultCard(vault) {
             }
         }, 0);
     } else if (vault.depositToken) {
-        // 如果没有价格数据，异步加载
+        // 如果没有价格数据，等待批量价格加载完成（避免重复请求）
+        // 如果 3 秒后还没有价格数据，再单独请求（可能是批量加载失败）
         setTimeout(() => {
             const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
             if (!valueEl) return;
 
+            // 先检查是否已经有价格数据（批量加载可能已完成）
+            if (vault.priceData) {
+                const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                const valueSpan = valueEl.querySelector('.value');
+                if (valueSpan) {
+                    valueSpan.textContent = totalValue;
+                    valueSpan.classList.remove('price-loading');
+                }
+                return;
+            }
+
+            // 如果还没有，再单独请求（作为兜底）
             getTokenPrice(vault.depositToken).then(priceData => {
                 const valueSpan = valueEl.querySelector('.value');
                 if (valueSpan) {
                     if (priceData) {
+                        vault.priceData = priceData; // 缓存到 vault 对象
                         const totalValue = calculateTotalValue(vault.totalDepositsFormatted, priceData.price);
                         valueSpan.textContent = totalValue;
                     } else {
@@ -1915,7 +2073,7 @@ function createVaultCard(vault) {
                     valueSpan.classList.remove('price-loading');
                 }
             });
-        }, 0);
+        }, 3000); // 等待 3 秒，给批量加载时间
     } else {
         // 没有代币地址，直接显示 N/A
         setTimeout(() => {
