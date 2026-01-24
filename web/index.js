@@ -520,15 +520,23 @@ async function refreshAllVaultPrices() {
                 vault.priceData = priceMap.get(vault.depositToken);
                 if (vault.priceData) {
                     successCount++;
-                    // 更新页面上的显示
-                    const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
-                    if (valueEl) {
-                        const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
-                        const valueSpan = valueEl.querySelector('.value');
-                        if (valueSpan) {
-                            valueSpan.textContent = totalValue;
+                    // 更新页面上的显示 - 需要查找所有匹配的元素
+                    // 因为地址可能大小写不同，需要进行模糊匹配
+                    const vaultAddressLower = vault.address.toLowerCase();
+                    const valueEls = document.querySelectorAll(`[id*="vault-total-value-"]`);
+                    
+                    valueEls.forEach(valueEl => {
+                        // 检查这个元素是否属于当前金库
+                        if (valueEl.id.includes(vaultAddressLower) || valueEl.id.toLowerCase().includes(vaultAddressLower)) {
+                            const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                            const valueSpan = valueEl.querySelector('.value');
+                            if (valueSpan) {
+                                console.log(`[自动刷新] 更新金库 ${vault.address} 的市值为 ${totalValue}`);
+                                valueSpan.textContent = totalValue;
+                                valueSpan.classList.remove('price-loading');
+                            }
                         }
-                    }
+                    });
                 } else {
                     failCount++;
                 }
@@ -2378,7 +2386,7 @@ function createVaultCard(vault) {
                 <span class="label">总存款</span>
                 <span class="value">${parseFloat(vault.totalDepositsFormatted).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
             </div>
-            <div class="info-row" id="vault-total-value-${vault.address}">
+            <div class="info-row" id="vault-total-value-${vault.address.toLowerCase()}">
                 <span class="label">总市值</span>
                 <span class="value price-loading">加载中...</span>
             </div>
@@ -2403,7 +2411,7 @@ function createVaultCard(vault) {
     if (vault.priceData) {
         // 使用已加载的价格数据，使用 setTimeout 确保 DOM 已更新
         setTimeout(() => {
-            const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+            const valueEl = document.getElementById(`vault-total-value-${vault.address.toLowerCase()}`);
             if (valueEl) {
                 const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
                 const valueSpan = valueEl.querySelector('.value');
@@ -2417,7 +2425,7 @@ function createVaultCard(vault) {
         // 如果没有价格数据，等待批量价格加载完成（避免重复请求）
         // 如果 3 秒后还没有价格数据，再单独请求（可能是批量加载失败）
         setTimeout(() => {
-            const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
+            const valueEl = document.getElementById(`vault-total-value-${vault.address.toLowerCase()}`);
             if (!valueEl) return;
 
             // 先检查是否已经有价格数据（批量加载可能已完成）
