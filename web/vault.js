@@ -186,7 +186,33 @@ function selectBestPair(pairs) {
         })[0];
     }
 
-    // 2. 如果没有 USDT，选择 BNB 交易对（需要额外转换，暂时返回null）
+    // 2. 如果没有 USDT，尝试找 BUSD 交易对
+    const busdPairs = pairs.filter(p => {
+        const quoteSymbol = p.quoteToken?.symbol?.toUpperCase();
+        const baseSymbol = p.baseToken?.symbol?.toUpperCase();
+        return quoteSymbol === 'BUSD' || baseSymbol === 'BUSD';
+    });
+
+    if (busdPairs.length > 0) {
+        return busdPairs.sort((a, b) => {
+            const liquidityA = parseFloat(a.liquidity?.usd || 0);
+            const liquidityB = parseFloat(b.liquidity?.usd || 0);
+            return liquidityB - liquidityA;
+        })[0];
+    }
+
+    // 3. 如果没有稳定币交易对，选择流动性最高的任何交易对
+    const bestByLiquidity = pairs.sort((a, b) => {
+        const liquidityA = parseFloat(a.liquidity?.usd || 0);
+        const liquidityB = parseFloat(b.liquidity?.usd || 0);
+        return liquidityB - liquidityA;
+    })[0];
+
+    if (bestByLiquidity && bestByLiquidity.priceUsd) {
+        console.log(`[交易对选择] 使用流动性最高的交易对: ${bestByLiquidity.baseToken?.symbol}/${bestByLiquidity.quoteToken?.symbol}`);
+        return bestByLiquidity;
+    }
+
     return null;
 }
 
@@ -213,7 +239,13 @@ async function getTokenPrice(tokenAddress, chainId = null) {
     try {
         // 确定 chainId
         const dexChainId = chainId || getDexScreenerChainId(CONFIG.chainIdDec);
-        const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${tokenAddress}`;
+        
+        // 确保 tokenAddress 是字符串格式
+        const normalizedAddress = typeof tokenAddress === 'string' ? tokenAddress : tokenAddress.toString();
+        const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${normalizedAddress}`;
+
+        console.log(`[价格查询] 开始查询: ${normalizedAddress.substring(0, 10)}... (${dexChainId})`);
+        console.log(`[价格查询] 完整 URL: ${url}`);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时（DexScreener API 可能较慢）
@@ -225,14 +257,39 @@ async function getTokenPrice(tokenAddress, chainId = null) {
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-            console.warn(`DexScreener API 请求失败: ${response.status}`);
+            console.warn(`[价格查询] DexScreener API 请求失败: ${response.status} - ${tokenAddress}`);
             return null;
         }
 
         const data = await response.json();
-        const bestPair = selectBestPair(data.pairs);
+        console.log(`[价格查询] 完整 API 响应:`, data);
+        
+        // DexScreener API 返回数组格式的交易对列表
+        let pairs = Array.isArray(data) ? data : (data.pairs || []);
+        console.log(`[价格查询] API 返回 ${pairs.length} 个交易对`);
+        
+        const bestPair = selectBestPair(pairs);
 
-        if (!bestPair || !bestPair.priceUsd) {
+        if (!bestPair) {
+            console.warn(`[价格查询] 未找到有效的交易对: ${tokenAddress}`);
+            if (pairs && pairs.length > 0) {
+                console.log(`[价格查询] 可用的交易对信息:`, pairs.map(p => ({
+                    base: p.baseToken?.symbol,
+                    quote: p.quoteToken?.symbol,
+                    price: p.priceUsd,
+                    liquidity: p.liquidity?.usd
+                })));
+            } else {
+                console.warn(`[价格查询] 响应中没有交易对数据`, { 
+                    isArray: Array.isArray(data),
+                    dataKeys: Object.keys(data || {})
+                });
+            }
+            return null;
+        }
+
+        if (!bestPair.priceUsd) {
+            console.warn(`[价格查询] 交易对缺少价格信息: ${tokenAddress}`, bestPair);
             return null;
         }
 
@@ -240,6 +297,8 @@ async function getTokenPrice(tokenAddress, chainId = null) {
             price: parseFloat(bestPair.priceUsd),
             change24h: bestPair.priceChange?.h24 || 0
         };
+
+        console.log(`[价格查询] ✓ 成功获取价格: $${priceData.price} (${bestPair.baseToken?.symbol}/${bestPair.quoteToken?.symbol})`);
 
         // 更新缓存
         priceCache.set(cacheKey, {
@@ -250,9 +309,9 @@ async function getTokenPrice(tokenAddress, chainId = null) {
         return priceData;
     } catch (error) {
         if (error.name === 'AbortError') {
-            console.warn(`获取代币价格超时: ${tokenAddress}`);
+            console.warn(`[价格查询] 获取代币价格超时: ${tokenAddress}`);
         } else {
-            console.warn(`获取代币价格失败: ${tokenAddress}`, error);
+            console.warn(`[价格查询] 获取代币价格失败: ${tokenAddress}`, error);
         }
         return null;
     }
