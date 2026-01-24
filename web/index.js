@@ -13,7 +13,7 @@ const NETWORKS = {
         displayName: 'BSC 主网',
         rpcUrl: 'https://bsc-dataseed.bnbchain.org',
         explorer: 'https://bscscan.com',
-        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 主网工厂合约地址（需要替换为实际地址）
+        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab' // 主网工厂合约地址（需要替换为实际地址）
     },
     testnet: {
         chainId: '0x61',
@@ -1886,7 +1886,7 @@ function showModal(title, message, options = {}) {
             // 移除旧的事件监听器，添加新的
             const newCloseBtn = closeBtn.cloneNode(true);
             closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-            
+
             // 同时支持点击和触摸事件（移动端兼容）
             newCloseBtn.addEventListener('click', closeModal);
             newCloseBtn.addEventListener('touchend', (e) => {
@@ -1983,7 +1983,7 @@ function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
         // 移除旧的事件监听器，添加新的
         const newCloseBtn = closeBtn.cloneNode(true);
         closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-        
+
         // 同时支持点击和触摸事件（移动端兼容）
         newCloseBtn.addEventListener('click', closeModal);
         newCloseBtn.addEventListener('touchend', (e) => {
@@ -1998,11 +1998,11 @@ function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
             closeModal();
         }
     };
-    
+
     // 移除旧的事件监听器
     overlay.removeEventListener('click', handleOverlayClick);
     overlay.removeEventListener('touchend', handleOverlayClick);
-    
+
     // 添加新的事件监听器
     overlay.addEventListener('click', handleOverlayClick);
     overlay.addEventListener('touchend', (e) => {
@@ -2018,7 +2018,7 @@ function showVaultSelectionModal(activeVaults, tokenSymbol = 'TOKEN') {
         // 移除旧的事件监听器
         const newBtn = btn.cloneNode(true);
         btn.parentNode.replaceChild(newBtn, btn);
-        
+
         // 添加点击和触摸事件
         newBtn.addEventListener('click', () => {
             const addr = newBtn.getAttribute('data-address');

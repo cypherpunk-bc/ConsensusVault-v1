@@ -12,7 +12,7 @@ const NETWORKS = {
         displayName: 'BSC 主网',
         rpcUrl: 'https://bsc-dataseed.bnbchain.org',
         explorer: 'https://bscscan.com',
-        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 主网工厂合约地址（需要替换为实际地址）
+        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab' // 主网工厂合约地址（需要替换为实际地址）
     },
     testnet: {
         chainId: '0x61',
