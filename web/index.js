@@ -1718,6 +1718,12 @@ function renderUserVaults() {
 
         grid.appendChild(card);
     });
+
+    // 渲染完成后立即刷新价格（不要等30秒）
+    console.log('[我的金库] 渲染完成，立即刷新价格...');
+    refreshAllVaultPrices().catch(err => {
+        console.warn('[我的金库] 立即刷新价格失败:', err);
+    });
 }
 
 function setupEventListeners() {
