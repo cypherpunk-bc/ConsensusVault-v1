@@ -520,20 +520,43 @@ async function refreshAllVaultPrices() {
                 vault.priceData = priceMap.get(vault.depositToken);
                 if (vault.priceData) {
                     successCount++;
-                    // 更新页面上的显示 - 需要查找所有匹配的元素
-                    // 因为地址可能大小写不同，需要进行模糊匹配
+                    
+                    // 更新金库列表卡片（vault-total-value-）
                     const vaultAddressLower = vault.address.toLowerCase();
                     const valueEls = document.querySelectorAll(`[id*="vault-total-value-"]`);
                     
                     valueEls.forEach(valueEl => {
-                        // 检查这个元素是否属于当前金库
                         if (valueEl.id.includes(vaultAddressLower) || valueEl.id.toLowerCase().includes(vaultAddressLower)) {
                             const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
                             const valueSpan = valueEl.querySelector('.value');
                             if (valueSpan) {
-                                console.log(`[自动刷新] 更新金库 ${vault.address} 的市值为 ${totalValue}`);
+                                console.log(`[自动刷新] 更新金库总市值 ${vault.address.substring(0, 10)}... 为 ${totalValue}`);
                                 valueSpan.textContent = totalValue;
                                 valueSpan.classList.remove('price-loading');
+                            }
+                        }
+                    });
+                    
+                    // 更新用户金库卡片（user-vault-value-）
+                    const userVaultEls = document.querySelectorAll(`[id*="user-vault-value-"]`);
+                    userVaultEls.forEach(userVaultEl => {
+                        if (userVaultEl.id.includes(vaultAddressLower) || userVaultEl.id.toLowerCase().includes(vaultAddressLower)) {
+                            // 需要找到对应的 userVault 对象来获取 depositAmount
+                            const userVaultCard = userVaultEl.closest('.card-body');
+                            if (userVaultCard) {
+                                // 从金库列表中找到对应的用户金库数据
+                                const participatedVault = userCache.participatedVaults?.find(v => 
+                                    v.address.toLowerCase() === vault.address.toLowerCase()
+                                );
+                                if (participatedVault) {
+                                    const userValue = calculateTotalValue(participatedVault.depositAmount, vault.priceData.price);
+                                    const valueSpan = userVaultEl.querySelector('.value');
+                                    if (valueSpan) {
+                                        console.log(`[自动刷新] 更新用户持仓市值 ${vault.address.substring(0, 10)}... 为 ${userValue}`);
+                                        valueSpan.textContent = userValue;
+                                        valueSpan.classList.remove('price-loading');
+                                    }
+                                }
                             }
                         }
                     });
