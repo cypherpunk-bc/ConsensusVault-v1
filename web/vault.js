@@ -964,10 +964,26 @@ async function loadVaultDetails() {
             console.warn('读取金库信息失败，保留默认标题', e);
         }
 
+        // 获取合约实际余额（用于计算真实总市值，包含捐赠部分）
+        let contractBalance = totalPrincipal; // 默认使用 totalPrincipal 作为后备
+        if (depositTokenAddr && depositTokenAddr !== ethers.constants.AddressZero) {
+            try {
+                const depositToken = new ethers.Contract(
+                    depositTokenAddr,
+                    ['function balanceOf(address) view returns (uint256)'],
+                    provider
+                );
+                contractBalance = await depositToken.balanceOf(vaultAddress);
+            } catch (e) {
+                console.warn('获取合约余额失败，使用 totalPrincipal 作为后备:', e);
+            }
+        }
+
         // 获取代币小数位数（如果 depositTokenAddr 为空，使用默认值18）
         const decimals = depositTokenAddr ? await getTokenDecimals(depositTokenAddr, provider) : 18;
 
         const totalPrincipalNum = parseFloat(formatTokenAmount(totalPrincipal, decimals));
+        const contractBalanceNum = parseFloat(formatTokenAmount(contractBalance, decimals));
         const totalVoteWeightNum = parseFloat(formatTokenAmount(totalVoteWeight, decimals));
 
         // 如果金库已解锁，进度显示 100%
@@ -1083,8 +1099,8 @@ async function loadVaultDetails() {
                 // 先显示加载中
                 elem('totalMarketValue').textContent = '加载中...';
             }
-            // 异步执行，不阻塞渲染
-            refreshVaultPrice(depositTokenAddr, totalPrincipalNum).catch(err => {
+            // 异步执行，不阻塞渲染（使用合约余额计算总市值）
+            refreshVaultPrice(depositTokenAddr, contractBalanceNum).catch(err => {
                 console.warn('价格加载失败:', err);
                 if (elem('totalMarketValue')) {
                     elem('totalMarketValue').textContent = 'N/A';
@@ -1096,8 +1112,8 @@ async function loadVaultDetails() {
             }
         }
 
-        // 启动价格自动刷新
-        startVaultPriceAutoRefresh(depositTokenAddr, totalPrincipalNum);
+        // 启动价格自动刷新（使用合约余额）
+        startVaultPriceAutoRefresh(depositTokenAddr, contractBalanceNum);
 
         console.log('✓ 金库详情加载完成');
     } catch (error) {
@@ -2236,8 +2252,10 @@ async function updateMarketUserInfo() {
 
 /**
  * 刷新金库总市值
+ * @param {string} tokenAddress - 代币地址
+ * @param {number} contractBalanceNum - 合约实际余额（包含捐赠部分），用于计算真实总市值
  */
-async function refreshVaultPrice(tokenAddress, totalPrincipalNum) {
+async function refreshVaultPrice(tokenAddress, contractBalanceNum) {
     if (!tokenAddress) return;
 
     try {
@@ -2245,7 +2263,7 @@ async function refreshVaultPrice(tokenAddress, totalPrincipalNum) {
         const elem = (id) => document.getElementById(id);
         if (elem('totalMarketValue')) {
             if (priceData) {
-                const totalValue = calculateTotalValue(totalPrincipalNum, priceData.price);
+                const totalValue = calculateTotalValue(contractBalanceNum, priceData.price);
                 elem('totalMarketValue').textContent = totalValue;
             } else {
                 elem('totalMarketValue').textContent = 'N/A';
@@ -2290,8 +2308,10 @@ let currentVaultData = {
 
 /**
  * 启动金库详情页价格自动刷新
+ * @param {string} tokenAddress - 代币地址
+ * @param {number} contractBalanceNum - 合约实际余额（包含捐赠部分）
  */
-function startVaultPriceAutoRefresh(tokenAddress, totalPrincipalNum) {
+function startVaultPriceAutoRefresh(tokenAddress, contractBalanceNum) {
     // 清除旧的定时器
     if (priceRefreshTimer) {
         clearInterval(priceRefreshTimer);
@@ -2301,13 +2321,13 @@ function startVaultPriceAutoRefresh(tokenAddress, totalPrincipalNum) {
 
     // 保存当前金库数据
     currentVaultData.tokenAddress = tokenAddress;
-    currentVaultData.totalPrincipalNum = totalPrincipalNum;
+    currentVaultData.totalPrincipalNum = contractBalanceNum; // 实际存储的是合约余额
 
     // 每30秒自动刷新一次价格
     priceRefreshTimer = setInterval(async () => {
         if (!currentVaultData.tokenAddress) return;
 
-        // 刷新金库总市值
+        // 刷新金库总市值（使用合约余额）
         if (currentVaultData.totalPrincipalNum > 0) {
             await refreshVaultPrice(currentVaultData.tokenAddress, currentVaultData.totalPrincipalNum);
         }

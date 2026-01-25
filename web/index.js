@@ -527,7 +527,7 @@ async function refreshAllVaultPrices() {
                     
                     valueEls.forEach(valueEl => {
                         if (valueEl.id.includes(vaultAddressLower) || valueEl.id.toLowerCase().includes(vaultAddressLower)) {
-                            const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                            const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, vault.priceData.price);
                             const valueSpan = valueEl.querySelector('.value');
                             if (valueSpan) {
                                 console.log(`[自动刷新] 更新金库总市值 ${vault.address.substring(0, 10)}... 为 ${totalValue}`);
@@ -1369,6 +1369,16 @@ async function loadAllVaults() {
             calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('participantCount') });
         });
 
+        // 额外查询每个金库的合约余额（用于计算真实总市值）
+        const tokenBalanceCalls = [];
+        const tokenBalanceInterface = new ethers.utils.Interface([
+            'function balanceOf(address) view returns (uint256)'
+        ]);
+        
+        // 先获取所有金库的 depositToken 地址，然后查询余额
+        // 注意：这里需要两轮查询，第一轮获取 depositToken，第二轮查询余额
+        // 为了简化，我们在解码第一轮结果后再查询余额
+
         console.log(`📡 通过 Multicall 批量查询 ${vaultAddresses.length} 个金库的金库详情（${calls.length} 次调用）...`);
         const [blockNumber, returnData] = await multicallContract.callStatic.aggregate(calls);
 
@@ -1409,7 +1419,58 @@ async function loadAllVaults() {
 
         console.log(`✓ Multicall 查询完成，成功获取 ${vaultDetails.length} 个金库详情`);
 
-        // 4. 批量获取代币信息（symbol, decimals）
+        // 4. 批量查询每个金库的合约余额（用于计算真实总市值）
+        const vaultBalanceMap = new Map();
+        if (vaultDetails.length > 0) {
+            const balanceCalls = [];
+            const balanceInterface = new ethers.utils.Interface([
+                'function balanceOf(address) view returns (uint256)'
+            ]);
+
+            vaultDetails.forEach(vault => {
+                if (vault.depositToken && vault.depositToken !== ethers.constants.AddressZero) {
+                    balanceCalls.push({
+                        target: vault.depositToken,
+                        callData: balanceInterface.encodeFunctionData('balanceOf', [vault.address])
+                    });
+                }
+            });
+
+            if (balanceCalls.length > 0) {
+                try {
+                    console.log(`📡 批量查询 ${balanceCalls.length} 个金库的合约余额...`);
+                    const [, balanceReturnData] = await multicallContract.callStatic.aggregate(balanceCalls);
+                    
+                    let balanceCallIndex = 0;
+                    vaultDetails.forEach(vault => {
+                        if (vault.depositToken && vault.depositToken !== ethers.constants.AddressZero) {
+                            try {
+                                const balanceResult = balanceInterface.decodeFunctionResult('balanceOf(address)', balanceReturnData[balanceCallIndex]);
+                                vaultBalanceMap.set(vault.address, balanceResult[0]);
+                                balanceCallIndex++;
+                            } catch (err) {
+                                console.warn(`解码金库 ${vault.address} 余额失败:`, err);
+                                // 如果查询失败，使用 totalPrincipal 作为后备
+                                vaultBalanceMap.set(vault.address, vault.totalDeposits);
+                                balanceCallIndex++;
+                            }
+                        } else {
+                            // 如果没有 depositToken，使用 totalPrincipal
+                            vaultBalanceMap.set(vault.address, vault.totalDeposits);
+                        }
+                    });
+                    console.log(`✓ 合约余额查询完成`);
+                } catch (err) {
+                    console.warn('批量查询合约余额失败，使用 totalPrincipal 作为后备:', err);
+                    // 如果批量查询失败，使用 totalPrincipal 作为后备
+                    vaultDetails.forEach(vault => {
+                        vaultBalanceMap.set(vault.address, vault.totalDeposits);
+                    });
+                }
+            }
+        }
+
+        // 5. 批量获取代币信息（symbol, decimals）
         const tokenInfoMap = new Map();
         if (tokenAddresses.size > 0) {
             const tokenCalls = [];
@@ -1460,15 +1521,17 @@ async function loadAllVaults() {
             }
         }
 
-        // 5. 格式化并组装最终数据
+        // 6. 格式化并组装最终数据
         allVaults = vaultDetails.map(vault => {
             const tokenInfo = tokenInfoMap.get(vault.depositToken) || { symbol: 'TOKEN', decimals: 18 };
             const decimals = tokenInfo.decimals;
+            const contractBalance = vaultBalanceMap.get(vault.address) || vault.totalDeposits;
 
             return {
                 address: vault.address,
                 depositToken: vault.depositToken,
                 totalDeposits: vault.totalDeposits,
+                contractBalance: contractBalance, // 合约实际余额（包含捐赠）
                 totalYesVotes: vault.totalYesVotes,
                 consensusReached: vault.consensusReached,
                 unlockAt: vault.unlockAt,
@@ -1478,6 +1541,7 @@ async function loadAllVaults() {
                 tokenDecimals: decimals,
                 blockNumber: vault.blockNumber,
                 totalDepositsFormatted: formatTokenAmount(vault.totalDeposits, decimals),
+                contractBalanceFormatted: formatTokenAmount(contractBalance, decimals), // 用于计算总市值
                 totalYesVotesFormatted: formatTokenAmount(vault.totalYesVotes, decimals),
                 displayName: vault.vaultName && vault.vaultName.trim()
                     ? `${vault.vaultName} ${tokenInfo.symbol}`
@@ -1505,7 +1569,7 @@ async function loadAllVaults() {
                             // 更新页面上已渲染的金库卡片
                             const valueEl = document.getElementById(`vault-total-value-${vault.address}`);
                             if (valueEl) {
-                                const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                                const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, vault.priceData.price);
                                 const valueSpan = valueEl.querySelector('.value');
                                 if (valueSpan) {
                                     valueSpan.textContent = totalValue;
@@ -2442,7 +2506,7 @@ function createVaultCard(vault) {
         setTimeout(() => {
             const valueEl = document.getElementById(`vault-total-value-${vault.address.toLowerCase()}`);
             if (valueEl) {
-                const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, vault.priceData.price);
                 const valueSpan = valueEl.querySelector('.value');
                 if (valueSpan) {
                     valueSpan.textContent = totalValue;
@@ -2459,7 +2523,7 @@ function createVaultCard(vault) {
 
             // 先检查是否已经有价格数据（批量加载可能已完成）
             if (vault.priceData) {
-                const totalValue = calculateTotalValue(vault.totalDepositsFormatted, vault.priceData.price);
+                const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, vault.priceData.price);
                 const valueSpan = valueEl.querySelector('.value');
                 if (valueSpan) {
                     valueSpan.textContent = totalValue;
@@ -2474,7 +2538,7 @@ function createVaultCard(vault) {
                 if (valueSpan) {
                     if (priceData) {
                         vault.priceData = priceData; // 缓存到 vault 对象
-                        const totalValue = calculateTotalValue(vault.totalDepositsFormatted, priceData.price);
+                        const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, priceData.price);
                         valueSpan.textContent = totalValue;
                     } else {
                         valueSpan.textContent = 'N/A';
