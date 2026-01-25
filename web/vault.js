@@ -1188,13 +1188,15 @@ async function loadUserInfo() {
         }
 
         // 异步获取价格并计算用户持仓市值（不阻塞主流程）
-        currentVaultData.userPrincipalNum = principalNum; // 保存用户本金数据
-        if (depositTokenAddr && principalNum > 0) {
+        // 持仓市值 = 本金 + 获得的捐赠
+        const totalAmountNum = principalNum + pendingReward;
+        currentVaultData.userPrincipalNum = totalAmountNum; // 保存用户总资产数据（本金+捐赠）
+        if (depositTokenAddr && totalAmountNum > 0) {
             if (document.getElementById('myDepositValue')) {
                 document.getElementById('myDepositValue').textContent = '加载中...';
             }
             // 异步执行，不阻塞渲染
-            refreshUserPrice(depositTokenAddr, principalNum).catch(err => {
+            refreshUserPrice(depositTokenAddr, totalAmountNum).catch(err => {
                 console.warn('用户价格加载失败:', err);
                 if (document.getElementById('myDepositValue')) {
                     document.getElementById('myDepositValue').textContent = 'N/A';
@@ -2280,15 +2282,17 @@ async function refreshVaultPrice(tokenAddress, contractBalanceNum) {
 
 /**
  * 刷新用户持仓市值
+ * @param {string} tokenAddress - 代币地址
+ * @param {number} totalAmountNum - 用户总资产（本金 + 获得的捐赠）
  */
-async function refreshUserPrice(tokenAddress, principalNum) {
-    if (!tokenAddress || principalNum <= 0) return;
+async function refreshUserPrice(tokenAddress, totalAmountNum) {
+    if (!tokenAddress || totalAmountNum <= 0) return;
 
     try {
         const priceData = await getTokenPrice(tokenAddress);
         const myDepositValueEl = document.getElementById('myDepositValue');
         if (myDepositValueEl && priceData) {
-            const userValue = calculateTotalValue(principalNum, priceData.price);
+            const userValue = calculateTotalValue(totalAmountNum, priceData.price);
             myDepositValueEl.textContent = `我的持仓市值: ${userValue}`;
             myDepositValueEl.style.display = 'block';
         } else if (myDepositValueEl) {

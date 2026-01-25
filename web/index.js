@@ -549,7 +549,9 @@ async function refreshAllVaultPrices() {
                                     v.address.toLowerCase() === vault.address.toLowerCase()
                                 );
                                 if (participatedVault) {
-                                    const userValue = calculateTotalValue(participatedVault.depositAmount, vault.priceData.price);
+                                    // 持仓市值 = 本金 + 获得的捐赠
+                                    const totalAmount = participatedVault.totalAmount || participatedVault.depositAmount;
+                                    const userValue = calculateTotalValue(totalAmount, vault.priceData.price);
                                     const valueSpan = userVaultEl.querySelector('.value');
                                     if (valueSpan) {
                                         console.log(`[自动刷新] 更新用户持仓市值 ${vault.address.substring(0, 10)}... 为 ${userValue}`);
@@ -1314,14 +1316,27 @@ async function getAllVaultAddresses(maxLimit = 100) {
  * @returns {Array} 格式化后的用户金库列表
  */
 function formatUserVaults(vaults) {
+    const PRECISION = ethers.BigNumber.from('1000000000000'); // 1e12
+    
     return vaults
         .filter(vault => vault.userInfo && vault.userInfo.principal && vault.userInfo.principal.gt(0))
         .map(vault => {
             const decimals = vault.tokenDecimals || 18;
+            const principal = vault.userInfo.principal;
+            const rewardDebt = vault.userInfo.rewardDebt || ethers.BigNumber.from(0);
+            const accRewardPerShare = vault.userInfo.accRewardPerShare || ethers.BigNumber.from(0);
+            
+            // 计算用户获得的捐赠：pendingReward = (principal * accRewardPerShare) / PRECISION - rewardDebt
+            const pendingRewardRaw = principal.mul(accRewardPerShare).div(PRECISION).sub(rewardDebt);
+            const pendingReward = formatTokenAmount(pendingRewardRaw, decimals);
+            const totalAmount = parseFloat(formatTokenAmount(principal, decimals)) + parseFloat(pendingReward);
+            
             return {
                 address: vault.address,
                 depositToken: vault.depositToken,
-                depositAmount: formatTokenAmount(vault.userInfo.principal, decimals),
+                depositAmount: formatTokenAmount(principal, decimals),
+                pendingReward: pendingReward, // 获得的捐赠
+                totalAmount: totalAmount.toString(), // 本金 + 获得的捐赠
                 consensusReached: vault.consensusReached,
                 tokenSymbol: vault.tokenSymbol,
                 vaultName: vault.vaultName,
@@ -1623,22 +1638,32 @@ async function loadUserVaults() {
         const multicallContract = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
         const vaultInterface = new ethers.utils.Interface(CONSENSUS_VAULT_ABI);
 
-        const calls = vaultAddresses.map(addr => ({
-            target: addr,
-            callData: vaultInterface.encodeFunctionData('userInfo', [walletAddress])
-        }));
+        // 同时查询 userInfo 和 accRewardPerShare（用于计算用户获得的捐赠）
+        const calls = [];
+        vaultAddresses.forEach(addr => {
+            calls.push({
+                target: addr,
+                callData: vaultInterface.encodeFunctionData('userInfo', [walletAddress])
+            });
+            calls.push({
+                target: addr,
+                callData: vaultInterface.encodeFunctionData('accRewardPerShare')
+            });
+        });
 
-        console.log(`📡 通过 Multicall 批量查询 ${vaultAddresses.length} 个金库的用户信息...`);
+        console.log(`📡 通过 Multicall 批量查询 ${vaultAddresses.length} 个金库的用户信息和累积分红...`);
         const [, returnData] = await multicallContract.callStatic.aggregate(calls);
 
-        // 解码用户信息并附加到 allVaults
+        // 解码用户信息和累积分红，并附加到 allVaults
         for (let i = 0; i < vaultAddresses.length; i++) {
             try {
-                const userInfoResult = vaultInterface.decodeFunctionResult('userInfo(address)', returnData[i]);
+                const userInfoResult = vaultInterface.decodeFunctionResult('userInfo(address)', returnData[i * 2]);
+                const accRewardPerShare = vaultInterface.decodeFunctionResult('accRewardPerShare()', returnData[i * 2 + 1])[0];
                 allVaults[i].userInfo = {
                     principal: userInfoResult[0],
                     rewardDebt: userInfoResult[1],
-                    hasVoted: userInfoResult[2]
+                    hasVoted: userInfoResult[2],
+                    accRewardPerShare: accRewardPerShare
                 };
             } catch (err) {
                 console.warn(`解码用户信息失败 ${vaultAddresses[i]}:`, err);
@@ -1712,6 +1737,10 @@ function renderUserVaults() {
                     <span class="label">我的存款</span>
                     <span class="value">${parseFloat(vault.depositAmount).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
                 </div>
+                <div class="info-row">
+                    <span class="label">我获得的捐赠</span>
+                    <span class="value">${parseFloat(vault.pendingReward || '0').toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
+                </div>
                 <div class="info-row" id="user-vault-value-${vault.address}">
                     <span class="label">持仓市值</span>
                     <span class="value price-loading">加载中...</span>
@@ -1732,8 +1761,10 @@ function renderUserVaults() {
         if (vault.depositToken) {
             // 先检查是否已经有价格数据（从 allVaults 中获取）
             const allVault = allVaults.find(v => v.address === vault.address);
+            // 持仓市值 = 本金 + 获得的捐赠
+            const totalAmount = vault.totalAmount || vault.depositAmount;
             if (allVault && allVault.priceData) {
-                const userValue = calculateTotalValue(vault.depositAmount, allVault.priceData.price);
+                const userValue = calculateTotalValue(totalAmount, allVault.priceData.price);
                 const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
                 if (valueEl) {
                     valueEl.querySelector('.value').textContent = userValue;
@@ -1745,7 +1776,7 @@ function renderUserVaults() {
                     // 再次检查（批量加载可能已完成）
                     const allVault = allVaults.find(v => v.address === vault.address);
                     if (allVault && allVault.priceData) {
-                        const userValue = calculateTotalValue(vault.depositAmount, allVault.priceData.price);
+                        const userValue = calculateTotalValue(totalAmount, allVault.priceData.price);
                         const valueEl = document.getElementById(`user-vault-value-${vault.address}`);
                         if (valueEl) {
                             valueEl.querySelector('.value').textContent = userValue;
@@ -1762,7 +1793,7 @@ function renderUserVaults() {
                             if (allVault) {
                                 allVault.priceData = priceData;
                             }
-                            const userValue = calculateTotalValue(vault.depositAmount, priceData.price);
+                            const userValue = calculateTotalValue(totalAmount, priceData.price);
                             valueEl.querySelector('.value').textContent = userValue;
                             valueEl.querySelector('.value').classList.remove('price-loading');
                         } else if (valueEl) {
