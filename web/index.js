@@ -1372,7 +1372,7 @@ async function loadAllVaults() {
         const vaultInterface = new ethers.utils.Interface(CONSENSUS_VAULT_ABI);
 
         const calls = [];
-        const CALLS_PER_VAULT = 7;
+        const CALLS_PER_VAULT = 8;
 
         vaultAddresses.forEach(addr => {
             calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('depositToken') });
@@ -1382,6 +1382,7 @@ async function loadAllVaults() {
             calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('consensusReached') });
             calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('unlockAt') });
             calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('participantCount') });
+            calls.push({ target: addr, callData: vaultInterface.encodeFunctionData('totalDonations') });
         });
 
         // 额外查询每个金库的合约余额（用于计算真实总市值）
@@ -1411,6 +1412,7 @@ async function loadAllVaults() {
                 const consensusReached = vaultInterface.decodeFunctionResult('consensusReached()', returnData[baseIndex + 4])[0];
                 const unlockAt = vaultInterface.decodeFunctionResult('unlockAt()', returnData[baseIndex + 5])[0];
                 const participantCount = vaultInterface.decodeFunctionResult('participantCount()', returnData[baseIndex + 6])[0];
+                const totalDonations = vaultInterface.decodeFunctionResult('totalDonations()', returnData[baseIndex + 7])[0];
 
                 vaultDetails.push({
                     address: vaultAddresses[i],
@@ -1420,6 +1422,7 @@ async function loadAllVaults() {
                     consensusReached,
                     unlockAt,
                     participantCount,
+                    totalDonations,
                     vaultName: name,
                     blockNumber: i
                 });
@@ -1548,6 +1551,7 @@ async function loadAllVaults() {
                 totalDeposits: vault.totalDeposits,
                 contractBalance: contractBalance, // 合约实际余额（包含捐赠）
                 totalYesVotes: vault.totalYesVotes,
+                totalDonations: vault.totalDonations,
                 consensusReached: vault.consensusReached,
                 unlockAt: vault.unlockAt,
                 participantCount: vault.participantCount,
@@ -1558,6 +1562,7 @@ async function loadAllVaults() {
                 totalDepositsFormatted: formatTokenAmount(vault.totalDeposits, decimals),
                 contractBalanceFormatted: formatTokenAmount(contractBalance, decimals), // 用于计算总市值
                 totalYesVotesFormatted: formatTokenAmount(vault.totalYesVotes, decimals),
+                totalDonationsFormatted: formatTokenAmount(vault.totalDonations, decimals), // 累计获得的捐赠
                 displayName: vault.vaultName && vault.vaultName.trim()
                     ? `${vault.vaultName} ${tokenInfo.symbol}`
                     : tokenInfo.symbol
@@ -2422,27 +2427,35 @@ function sortVaults(vaults, method) {
         case 'marketValue':
             // 按总市值倒序（需要价格数据）
             sorted.sort((a, b) => {
-                // 计算总市值
-                const getMarketValue = (vault) => {
-                    if (!vault.priceData || !vault.totalDepositsFormatted) return 0;
-                    const depositsNum = parseFloat(vault.totalDepositsFormatted) || 0;
-                    return depositsNum * vault.priceData.price;
+                const getMarketValue = (v) => {
+                    if (!v.priceData || !(v.contractBalanceFormatted || v.totalDepositsFormatted)) return 0;
+                    const amt = parseFloat(v.contractBalanceFormatted || v.totalDepositsFormatted) || 0;
+                    return amt * v.priceData.price;
                 };
-
                 const valueA = getMarketValue(a);
                 const valueB = getMarketValue(b);
+                if (valueA > 0 && valueB > 0) return valueB - valueA;
+                if (valueA > 0) return -1;
+                if (valueB > 0) return 1;
+                return (b.blockNumber || 0) - (a.blockNumber || 0);
+            });
+            break;
 
-                // 有价格数据的排在前面，然后按市值排序
-                if (valueA > 0 && valueB > 0) {
-                    return valueB - valueA;
-                } else if (valueA > 0) {
-                    return -1; // a 有价格，排在前面
-                } else if (valueB > 0) {
-                    return 1; // b 有价格，排在前面
-                } else {
-                    // 都没有价格，按区块号排序
-                    return (b.blockNumber || 0) - (a.blockNumber || 0);
-                }
+        case 'participantCount':
+            // 按参与人数倒序
+            sorted.sort((a, b) => {
+                const pa = Number(a.participantCount?.toString?.() ?? 0);
+                const pb = Number(b.participantCount?.toString?.() ?? 0);
+                return pb - pa;
+            });
+            break;
+
+        case 'donations':
+            // 按获得的捐赠倒序
+            sorted.sort((a, b) => {
+                const da = parseFloat(a.totalDonationsFormatted || '0') || 0;
+                const db = parseFloat(b.totalDonationsFormatted || '0') || 0;
+                return db - da;
             });
             break;
     }
@@ -2509,6 +2522,10 @@ function createVaultCard(vault) {
             <div class="info-row">
                 <span class="label">总存款</span>
                 <span class="value">${parseFloat(vault.totalDepositsFormatted).toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">获得的捐赠</span>
+                <span class="value">${parseFloat(vault.totalDonationsFormatted || '0').toFixed(4)} ${vault.tokenSymbol || 'TOKEN'}</span>
             </div>
             <div class="info-row" id="vault-total-value-${vault.address.toLowerCase()}">
                 <span class="label">总市值</span>
