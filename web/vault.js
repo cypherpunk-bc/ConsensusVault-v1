@@ -264,26 +264,77 @@ async function loadComments(vaultAddr) {
             comments = commentsData;
         }
 
+        // 查询 CommentAdded 事件，获取每条留言的交易哈希
+        const commentVaultAddr = CONFIG.commentVaultAddress;
+        let commentTxHashes = new Map(); // 使用 Map 存储留言的唯一标识到交易哈希的映射
+        
+        if (commentVaultAddr && commentVaultAddr !== '0x') {
+            try {
+                // 创建事件过滤器
+                const eventFilter = contract.filters.CommentAdded(vaultAddr);
+                // 查询所有相关事件
+                const events = await contract.queryFilter(eventFilter);
+                
+                // 通过区块号、用户地址、时间戳和消息内容来精确匹配留言
+                events.forEach(event => {
+                    if (event.args && event.args.vaultAddress && 
+                        event.args.vaultAddress.toLowerCase() === vaultAddr.toLowerCase()) {
+                        const blockNum = event.blockNumber;
+                        const userAddr = event.args.user;
+                        const timestamp = event.args.timestamp.toNumber();
+                        const message = event.args.message;
+                        const txHash = event.transactionHash;
+                        
+                        // 创建唯一标识：区块号 + 用户地址 + 时间戳 + 消息内容
+                        const key = `${blockNum}-${userAddr.toLowerCase()}-${timestamp}-${message}`;
+                        
+                        // 找到匹配的留言（通过多个条件匹配确保准确性）
+                        const commentIndex = comments.findIndex(c => {
+                            const cBlockNum = c.blockNumber.toNumber();
+                            const cUser = c.user.toLowerCase();
+                            const cTimestamp = c.timestamp.toNumber();
+                            const cMessage = c.message || '';
+                            
+                            return cBlockNum === blockNum &&
+                                   cUser === userAddr.toLowerCase() &&
+                                   Math.abs(cTimestamp - timestamp) <= 1 && // 允许1秒误差
+                                   cMessage === message; // 消息内容必须完全匹配
+                        });
+                        
+                        if (commentIndex >= 0) {
+                            commentTxHashes.set(commentIndex, txHash);
+                        }
+                    }
+                });
+            } catch (eventError) {
+                console.warn('[留言] 查询事件失败，将不显示留言交易哈希:', eventError);
+            }
+        }
+
         // 转换为前端格式（最新的在前）
-        return comments.map(c => {
+        return comments.map((c, index) => {
             const action = bytes32ToString(c.action);
-            let txHash = '';
+            let relatedTxHash = ''; // 关联的操作交易哈希
             if (c.txHash && c.txHash !== ethers.constants.HashZero) {
                 // 从 bytes32 恢复交易哈希（移除前导0）
                 const hex = c.txHash.replace(/^0x/, '');
                 // 移除前导0，恢复原始哈希（交易哈希应该是64个字符）
                 const trimmed = hex.replace(/^0+/, '');
                 if (trimmed.length >= 2) { // 至少要有2个字符（0x + 至少1个字符）
-                    txHash = '0x' + trimmed.padStart(64, '0');
+                    relatedTxHash = '0x' + trimmed.padStart(64, '0');
                 }
             }
+            
+            // 获取留言本身的交易哈希（注意：reverse 前，index 是原始顺序）
+            const commentTxHash = commentTxHashes.get(index) || '';
 
             return {
                 timestamp: c.timestamp.toNumber() * 1000, // 转换为毫秒
                 userAddress: c.user,
                 action: action || '',
                 message: c.message || '',
-                txHash: txHash || '',
+                txHash: relatedTxHash || '', // 关联的操作交易哈希
+                commentTxHash: commentTxHash, // 留言本身的交易哈希
                 blockNumber: c.blockNumber.toNumber()
             };
         }).reverse(); // 反转，最新的在前
@@ -1781,15 +1832,27 @@ async function renderComments(vaultAddr) {
         const action = ACTION_LABELS[c.action] || c.action || '—';
         const time = c.timestamp ? new Date(c.timestamp).toLocaleString() : '—';
         const msg = (c.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
-        const txLink = c.txHash && explorerUrl
-            ? `<a href="${explorerUrl}/tx/${c.txHash}" target="_blank" rel="noopener" class="comment-tx-link">链上哈希</a>`
-            : '';
+        
+        // 显示留言本身的交易哈希（优先显示）
+        const commentTxHash = c.commentTxHash || '';
+        // 显示关联的操作交易哈希（如果有）
+        const relatedTxHash = c.txHash || '';
+        
+        let txLinks = [];
+        if (commentTxHash && explorerUrl) {
+            txLinks.push(`<a href="${explorerUrl}/tx/${commentTxHash}" target="_blank" rel="noopener" class="comment-tx-link">留言哈希</a>`);
+        }
+        if (relatedTxHash && explorerUrl && relatedTxHash !== commentTxHash) {
+            txLinks.push(`<a href="${explorerUrl}/tx/${relatedTxHash}" target="_blank" rel="noopener" class="comment-tx-link">操作哈希</a>`);
+        }
+        const txLinksHtml = txLinks.length > 0 ? txLinks.join(' ') : '';
+        
         html += `<div class="comment-card">
             <div class="comment-meta">
                 <span class="comment-addr">${addr}</span>
                 <span class="comment-action">${action}</span>
                 <span class="comment-time">${time}</span>
-                ${txLink}
+                ${txLinksHtml}
             </div>
             ${msg ? `<div class="comment-body">${msg}</div>` : ''}
         </div>`;
