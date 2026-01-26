@@ -1,0 +1,262 @@
+/* ==========================================
+   ConsensusVault - 移动端样式文件
+   ========================================== */
+
+/* ===== 移动端响应式设计 ===== */
+
+/* 平板和小屏幕 */
+@media (max-width: 960px) {
+    .nav {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .search-bar input {
+        width: 140px;
+    }
+}
+
+/* 移动端平板 */
+@media (max-width: 768px) {
+    /* 移动端：金库详情容器使用全宽 */
+    .container.vault-detail-container {
+        width: 100%;
+        padding: 0 12px;
+    }
+
+    .vaults-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .vault-info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .action-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .activity-controls {
+        flex-direction: column;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sort-controls {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .search-bar {
+        width: 100%;
+        margin-left: 0;
+        margin-top: 10px;
+    }
+
+    .footer-links {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    /* 移动端：优化地址显示，防止截断 */
+    .info-card {
+        padding: 12px;
+        min-height: auto;
+    }
+
+    .info-card code {
+        font-size: 11px;
+        padding: 10px 8px;
+        line-height: 1.5;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        max-height: none;
+    }
+}
+
+/* 小屏手机 */
+@media (max-width: 640px) {
+    /* 确保所有容器不溢出屏幕 */
+    body {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    #app {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    .container {
+        width: 100%;
+        max-width: 100%;
+        padding: 0 12px;
+        box-sizing: border-box;
+    }
+
+    /* 小屏手机：进一步优化容器和内容 */
+    .container.vault-detail-container {
+        width: 100%;
+        padding: 0 12px;
+    }
+
+    .vault-header-section {
+        margin-top: 16px;
+        margin-bottom: 12px;
+    }
+
+    .vault-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .vault-header-row .section-title {
+        font-size: 18px;
+        width: 100%;
+    }
+
+    .btn-share-vault {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .info-card {
+        padding: 10px;
+    }
+
+    .info-card code {
+        font-size: 10px;
+        padding: 8px 6px;
+        line-height: 1.4;
+    }
+
+    .section {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+
+    .modal {
+        max-height: 85vh;
+        padding: 16px;
+    }
+    
+    .modal-body {
+        max-height: calc(85vh - 100px);
+    }
+    
+    /* 顶部导航在手机上改为垂直排列 */
+    .nav {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        padding: 8px 12px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .nav-left {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    /* 排列顺序：logo -> 搜索 -> tab */
+    .logo {
+        order: 1;
+        gap: 6px;
+    }
+
+    .logo-mark {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .logo-mark::before {
+        width: 5px;
+        height: 5px;
+    }
+
+    .logo-text {
+        font-size: 18px;
+    }
+
+    .search-bar {
+        order: 2;
+        width: 100%;
+        margin-top: 2px;
+        padding: 6px 10px;
+        box-sizing: border-box;
+    }
+
+    .nav-tabs {
+        order: 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        width: 100%;
+    }
+
+    /* 统一导航元素大小 - 移动端 */
+    .tab,
+    .chain-info,
+    .wallet-info,
+    .btn {
+        height: 36px;
+        font-size: 13px;
+        padding: 8px 12px;
+        flex: 1;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    /* 移动端网络选择下拉框 */
+    .chain-info select.network-select {
+        font-size: 13px;
+        padding: 0 4px;
+    }
+
+    /* 网络信息 + 钱包在最后一行 */
+    .nav-right {
+        order: 4;
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        box-sizing: border-box;
+    }
+
+    .chain-info,
+    .wallet-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .controls {
+        padding: 12px;
+    }
+
+    .table-wrap {
+        padding: 0 10px 10px;
+    }
+
+    /* 确保所有内容不溢出 */
+    .views-container {
+        width: 100%;
+        max-width: 100%;
+        padding: 20px 0;
+        box-sizing: border-box;
+    }
+}

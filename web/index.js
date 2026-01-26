@@ -646,6 +646,79 @@ function calculateTotalValue(totalDeposits, tokenPriceUSD) {
     return formatCurrency(totalValue);
 }
 
+/**
+ * 计算APY（年化收益率）
+ * @param {string|number} totalDonations - 总捐赠数量
+ * @param {string|number} totalDeposits - 总存款数量
+ * @param {number} [blockNumber] - 金库创建时的区块号（可选，用于计算年化）
+ * @param {number} [currentBlockNumber] - 当前区块号（可选）
+ * @returns {string} 格式化的APY字符串，如 "12.34%"
+ */
+async function calculateAPY(totalDonations, totalDeposits, blockNumber = null, currentBlockNumber = null) {
+    if (!totalDonations || !totalDeposits) return 'N/A';
+    const donationsNum = parseFloat(totalDonations);
+    const depositsNum = parseFloat(totalDeposits);
+    if (isNaN(donationsNum) || isNaN(depositsNum) || depositsNum === 0) return '0.00%';
+    
+    // 计算当前收益率
+    const currentYield = (donationsNum / depositsNum) * 100;
+    
+    // 如果没有区块号信息，直接返回当前收益率（不是年化）
+    if (!blockNumber || !provider) {
+        return currentYield.toFixed(2) + '%';
+    }
+    
+    try {
+        // 获取当前区块号（如果未提供）
+        if (!currentBlockNumber) {
+            currentBlockNumber = await provider.getBlockNumber();
+        }
+        
+        // 获取创建区块和当前区块的时间戳
+        const [creationBlock, currentBlock] = await Promise.all([
+            provider.getBlock(blockNumber),
+            provider.getBlock(currentBlockNumber)
+        ]);
+        
+        if (!creationBlock || !currentBlock) {
+            return currentYield.toFixed(2) + '%';
+        }
+        
+        const creationTime = creationBlock.timestamp;
+        const currentTime = currentBlock.timestamp;
+        const elapsedSeconds = currentTime - creationTime;
+        
+        // 如果时间太短（少于1小时），不进行年化计算，避免极端值
+        if (elapsedSeconds < 3600) {
+            return currentYield.toFixed(2) + '%';
+        }
+        
+        // 计算年化APY: (当前收益率 / 已过天数) * 365
+        const elapsedDays = elapsedSeconds / 86400; // 转换为天数
+        const apy = (currentYield / elapsedDays) * 365;
+        
+        return apy.toFixed(2) + '%';
+    } catch (error) {
+        console.warn('计算年化APY失败，返回当前收益率:', error);
+        return currentYield.toFixed(2) + '%';
+    }
+}
+
+/**
+ * 同步版本的APY计算（用于不需要异步的场景，返回当前收益率）
+ * @param {string|number} totalDonations - 总捐赠数量
+ * @param {string|number} totalDeposits - 总存款数量
+ * @returns {string} 格式化的收益率字符串，如 "12.34%"
+ */
+function calculateAPYSync(totalDonations, totalDeposits) {
+    if (!totalDonations || !totalDeposits) return 'N/A';
+    const donationsNum = parseFloat(totalDonations);
+    const depositsNum = parseFloat(totalDeposits);
+    if (isNaN(donationsNum) || isNaN(depositsNum) || depositsNum === 0) return '0.00%';
+    const yieldRate = (donationsNum / depositsNum) * 100;
+    return yieldRate.toFixed(2) + '%';
+}
+
 // ===== VaultManager 类 - 合约交互管理 =====
 class VaultManager {
     constructor(factoryAddress, provider) {

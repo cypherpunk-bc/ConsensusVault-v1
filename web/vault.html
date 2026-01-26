@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>金库详情 - ConsensusVault</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="mobile.css" media="(max-width: 960px)">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
@@ -25,8 +26,7 @@
             <div class="nav-right">
                 <div class="chain-info" id="networkInfo">
                     <i class="fas fa-network-wired"></i>
-                    <select id="networkSwitch" class="network-select"
-                        style="margin-right:10px; padding:6px 10px; border: 1px solid #ddd; border-radius: 6px; background: white; color: #333; font-size: 14px; cursor: pointer;">
+                    <select id="networkSwitch" class="network-select">
                         <option value="56">BSC 主网</option>
                         <option value="97">BSC 测试网</option>
                     </select>
@@ -100,7 +100,7 @@
                         <value id="unlockTime">未达成共识</value>
                     </div>
 
-                    <!-- 5. 赞成解锁票数（单独一排） -->
+                    <!-- 6. 赞成解锁票数（单独一排） -->
                     <div class="info-card info-card-wide">
                         <label>赞成解锁票数</label>
                         <value id="yesVotes">0</value>
