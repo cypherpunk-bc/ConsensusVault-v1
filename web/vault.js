@@ -13,8 +13,8 @@ const NETWORKS = {
         rpcUrl: 'https://bsc-dataseed.bnbchain.org',
         explorer: 'https://bscscan.com',
         factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab',
-        commentVaultAddress: '0x'
-        
+        commentVaultAddress: '0xB5C08A89F11D18A62361b87Dc963379281CA6D82'
+
     },
     testnet: {
         chainId: '0x61',
@@ -242,15 +242,15 @@ function bytes32ToString(bytes32Str) {
  */
 async function loadComments(vaultAddr) {
     if (!vaultAddr || !provider) return [];
-    
+
     const contract = getCommentVaultContract();
     if (!contract) return [];
-    
+
     try {
         // 获取留言数量
         const count = await contract.getCommentCount(vaultAddr);
         if (count.eq(0)) return [];
-        
+
         // 获取所有留言（如果数量不多，一次性获取；否则分页）
         let comments = [];
         if (count.lte(100)) {
@@ -263,7 +263,7 @@ async function loadComments(vaultAddr) {
             const commentsData = await contract.getComments(vaultAddr, 0, limit);
             comments = commentsData;
         }
-        
+
         // 转换为前端格式（最新的在前）
         return comments.map(c => {
             const action = bytes32ToString(c.action);
@@ -277,7 +277,7 @@ async function loadComments(vaultAddr) {
                     txHash = '0x' + trimmed.padStart(64, '0');
                 }
             }
-            
+
             return {
                 timestamp: c.timestamp.toNumber() * 1000, // 转换为毫秒
                 userAddress: c.user,
@@ -306,21 +306,21 @@ async function saveComment(vaultAddr, userAddress, action, message, txHash) {
     if (!vaultAddr || !userAddress || !message) {
         throw new Error('参数不完整');
     }
-    
+
     const contract = getCommentVaultContractWithSigner();
     if (!contract) {
         throw new Error('CommentVault 合约未配置或未连接钱包');
     }
-    
+
     // 检查留言长度
     if (message.length > 200) {
         throw new Error('留言过长，最多200个字符');
     }
-    
+
     // 转换为 bytes32
     const actionBytes32 = stringToBytes32(action || '');
     const txHashBytes32 = txHash ? stringToBytes32(txHash) : ethers.constants.HashZero;
-    
+
     // 调用合约
     const tx = await contract.addComment(
         vaultAddr,
@@ -328,10 +328,10 @@ async function saveComment(vaultAddr, userAddress, action, message, txHash) {
         actionBytes32,
         txHashBytes32
     );
-    
+
     // 等待交易确认
     await safeWaitForTransaction(tx);
-    
+
     return tx.hash;
 }
 
@@ -353,7 +353,7 @@ async function submitComment() {
         showModal('留言不能为空', '请输入留言内容');
         return;
     }
-    
+
     if (message.length > 200) {
         showModal('留言过长', '留言最多200个字符');
         return;
@@ -365,13 +365,13 @@ async function submitComment() {
 
     try {
         showLoading('正在提交留言到链上...');
-        
+
         const commentTxHash = await saveComment(addr, walletAddress, action, message, txHash);
         console.log('✓ 留言已上链:', commentTxHash);
-        
+
         hideLoading();
         showModal('留言成功', `您的留言已成功提交到链上！\n\n交易哈希: ${commentTxHash}`);
-        
+
         if (input) input.value = '';
         // 不清空pendingCommentContext，保留以便后续分享
         updateCommentCharCount();
@@ -381,7 +381,7 @@ async function submitComment() {
     } catch (error) {
         hideLoading();
         console.error('提交留言失败:', error);
-        
+
         let errorMsg = '留言提交失败，请重试';
         if (error.message) {
             if (error.message.includes('user rejected') || error.message.includes('User denied')) {
@@ -394,7 +394,7 @@ async function submitComment() {
                 errorMsg = `提交失败: ${error.message}`;
             }
         }
-        
+
         showModal('留言失败', errorMsg);
     }
 }
@@ -431,12 +431,12 @@ function generateVaultShareText(url) {
     const depositsText = tokenSymbol ? `总存款 ${deposits} ${tokenSymbol}` : `总存款 ${deposits}`;
     // 新格式：我在 @Consensus_Vault的<name>USDT金库 | 状态 | 总存款 | 参与人数
     let text = `我在 @Consensus_Vault的<${name}>${tokenSymbol}金库 | ${status} | ${depositsText} | ${participants} 人参与`;
-    
+
     // 如果提供了 URL，添加到文本中（单独一行，前面有空格）
     if (url) {
         text += `\n ${url}`;
     }
-    
+
     // 确保不超过 Twitter 最大长度
     if (text.length > TWITTER_MAX_LEN) {
         // 如果超长，先截断主文本，保留 URL
@@ -449,7 +449,7 @@ function generateVaultShareText(url) {
             }
         }
     }
-    
+
     return text;
 }
 
@@ -585,7 +585,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
     try {
         // 确定 chainId
         const dexChainId = chainId || getDexScreenerChainId(CONFIG.chainIdDec);
-        
+
         // 确保 tokenAddress 是字符串格式
         const normalizedAddress = typeof tokenAddress === 'string' ? tokenAddress : tokenAddress.toString();
         const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${normalizedAddress}`;
@@ -609,11 +609,11 @@ async function getTokenPrice(tokenAddress, chainId = null) {
 
         const data = await response.json();
         console.log(`[价格查询] 完整 API 响应:`, data);
-        
+
         // DexScreener API 返回数组格式的交易对列表
         let pairs = Array.isArray(data) ? data : (data.pairs || []);
         console.log(`[价格查询] API 返回 ${pairs.length} 个交易对`);
-        
+
         const bestPair = selectBestPair(pairs);
 
         if (!bestPair) {
@@ -626,7 +626,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
                     liquidity: p.liquidity?.usd
                 })));
             } else {
-                console.warn(`[价格查询] 响应中没有交易对数据`, { 
+                console.warn(`[价格查询] 响应中没有交易对数据`, {
                     isArray: Array.isArray(data),
                     dataKeys: Object.keys(data || {})
                 });
@@ -1128,7 +1128,7 @@ async function loadABIs() {
         // 3. [...] 直接数组格式
         VAULT_FACTORY_ABI = factoryData.abi || factoryData;
         CONSENSUS_VAULT_ABI = vaultData.abi || vaultData;
-        
+
         // CommentVault ABI（如果存在）
         if (commentRes && commentRes.ok) {
             const commentData = await commentRes.json();
@@ -2177,10 +2177,10 @@ function shortCommentForClose(ctx) {
  */
 function showSuccessWithCommentAndShare(title, message, ctx) {
     pendingCommentContext = ctx ? { action: ctx.action, amount: ctx.amount, txHash: ctx.txHash } : null;
-    
+
     // 生成默认内容
     const defaultText = generateDefaultShareText(ctx);
-    
+
     const safe = (message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
     const html = `
         <p class="modal-success-message">${safe}</p>
@@ -2195,17 +2195,17 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
             <button type="button" id="modalBtnComment" class="btn btn-primary"><i class="fas fa-comment"></i> 留言</button>
             <button type="button" id="modalBtnShare" class="btn btn-primary"><i class="fab fa-x-twitter"></i> 分享到 X</button>
         </div>`;
-    
+
     let hasClickedComment = false;
     let modalInput = null;
-    
+
     // 保存留言（长文案，用输入框内容）
     const saveCommentLong = async () => {
         if (!ctx || !vaultAddress || !walletAddress || !signer || hasClickedComment) return;
         try {
             let text = (modalInput?.value || '').trim() || defaultText;
             if (!text) return;
-            
+
             // 截断到200个字符（智能合约限制）
             if (text.length > 200) {
                 text = text.substring(0, 200);
@@ -2219,7 +2219,7 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
                     }
                 }
             }
-            
+
             showLoading('正在提交留言到链上...');
             await saveComment(vaultAddress, walletAddress, ctx.action, text, ctx.txHash);
             hideLoading();
@@ -2231,14 +2231,14 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
             showModal('留言失败', error.message || '提交留言时发生错误');
         }
     };
-    
+
     // 仅关闭时保存的短文案（如 "存款 1000 USDT"）
     const saveCommentShortOnClose = async () => {
         if (!ctx || !vaultAddress || !walletAddress || !signer || hasClickedComment) return;
         try {
             const text = shortCommentForClose(ctx);
             if (!text) return;
-            
+
             // 静默保存，不显示加载提示
             await saveComment(vaultAddress, walletAddress, ctx.action, text, ctx.txHash);
             await renderComments(vaultAddress);
@@ -2247,7 +2247,7 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
             // 静默失败，不打扰用户
         }
     };
-    
+
     showModal(title, '', {
         htmlBody: html,
         onRender(bodyEl, closeModal) {
@@ -2255,14 +2255,14 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
             const charCount = bodyEl.querySelector('#modalShareCharCount');
             const btnComment = bodyEl.querySelector('#modalBtnComment');
             const btnShare = bodyEl.querySelector('#modalBtnShare');
-            
+
             modalInput = input;
-            
+
             if (input && charCount) {
                 const updateCharCount = () => {
                     let value = input.value || '';
                     const n = value.length;
-                    
+
                     // 如果超过200字符，截断并更新输入框
                     if (n > 200) {
                         value = value.substring(0, 200);
@@ -2279,7 +2279,7 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
                         }
                     }
                 };
-                
+
                 // 监听输入事件，实时限制长度
                 input.addEventListener('input', (e) => {
                     if (input.value.length > 200) {
@@ -2287,7 +2287,7 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
                     }
                     updateCharCount();
                 });
-                
+
                 // 监听粘贴事件，防止粘贴超长内容
                 input.addEventListener('paste', (e) => {
                     setTimeout(() => {
@@ -2297,10 +2297,10 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
                         updateCharCount();
                     }, 0);
                 });
-                
+
                 updateCharCount();
             }
-            
+
             const disableBtn = (btn) => {
                 if (!btn) return;
                 btn.disabled = true;
@@ -2308,20 +2308,20 @@ function showSuccessWithCommentAndShare(title, message, ctx) {
                 btn.style.opacity = '0.5';
                 btn.style.cursor = 'not-allowed';
             };
-            
+
             // 留言：只保存，不关弹窗；仅留言按钮变灰失效
             if (btnComment) {
                 btnComment.addEventListener('click', async () => {
                     await saveCommentLong();
                     disableBtn(btnComment);
                 });
-                btnComment.addEventListener('touchend', async (e) => { 
-                    e.preventDefault(); 
+                btnComment.addEventListener('touchend', async (e) => {
+                    e.preventDefault();
                     await saveCommentLong();
                     disableBtn(btnComment);
                 });
             }
-            
+
             // 分享：只分享，不关弹窗；文案已含金库地址，不再传 url 避免重复；仅分享按钮变灰失效
             if (btnShare) {
                 btnShare.addEventListener('click', () => {
