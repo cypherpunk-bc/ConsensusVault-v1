@@ -63,8 +63,8 @@
                         </h2>
                         <div class="form-group">
                             <label>金库名称（可选）</label>
-                            <input type="text" id="createVaultNameInput" placeholder="输入自定义金库名称" class="input-large">
-                            <small>为金库起一个易记的名称，留空则使用代币符号</small>
+                            <input type="text" id="createVaultNameInput" placeholder="输入自定义金库名称" class="input-large" maxlength="50">
+                            <small>为金库起一个易记的名称（最多50个字符），留空则使用代币符号。在卡片中显示时超过30个字符会自动截断。</small>
                         </div>
                         <div class="form-group">
                             <label>代币合约地址</label>

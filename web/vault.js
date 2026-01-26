@@ -12,7 +12,9 @@ const NETWORKS = {
         displayName: 'BSC 主网',
         rpcUrl: 'https://bsc-dataseed.bnbchain.org',
         explorer: 'https://bscscan.com',
-        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab' // 主网工厂合约地址（需要替换为实际地址）
+        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab',
+        commentVaultAddress: '0x'
+        
     },
     testnet: {
         chainId: '0x61',
@@ -21,7 +23,8 @@ const NETWORKS = {
         displayName: 'BSC 测试网',
         rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
         explorer: 'https://testnet.bscscan.com',
-        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 测试网工厂合约地址
+        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98', // 测试网工厂合约地址
+        commentVaultAddress: '0xEE608F2E0C15EDae26D3D19113d4661353140b76' // 测试网留言合约地址
     }
 };
 
@@ -43,6 +46,7 @@ let vaultAddress = null;
 let isNetworkSwitching = false; // 网络切换标志，防止重复切换
 let VAULT_FACTORY_ABI = [];
 let CONSENSUS_VAULT_ABI = [];
+let COMMENT_VAULT_ABI = [];
 
 // 金库状态（用于按钮禁用检查）
 let vaultState = {
@@ -50,6 +54,12 @@ let vaultState = {
     unlockAt: 0,
     canWithdraw: false
 };
+
+/** 操作成功后的待留言上下文，用于关联留言与操作 */
+let pendingCommentContext = null;
+
+/** 金库分享用元数据（在 loadVaultDetails 中更新） */
+let vaultShareMeta = { displayName: '', totalDeposits: '', participantCount: 0, consensusReached: false, tokenSymbol: '' };
 
 // 扩展的 ERC20 ABI（包含 Transfer 事件和常用函数）
 const ERC20_EXTENDED_ABI = [
@@ -140,6 +150,342 @@ function formatTimestamp(tsSeconds) {
     if (!tsSeconds || tsSeconds <= 0) return '未达成共识';
     const date = new Date(tsSeconds * 1000);
     return date.toLocaleString();
+}
+
+// ===== 留言功能（链上存储） =====
+
+/**
+ * 获取 CommentVault 合约实例
+ * @returns {ethers.Contract|null}
+ */
+function getCommentVaultContract() {
+    if (!provider || !CONFIG.commentVaultAddress) {
+        console.warn('[留言] CommentVault 合约地址未配置');
+        return null;
+    }
+    if (COMMENT_VAULT_ABI.length === 0) {
+        console.warn('[留言] CommentVault ABI 未加载');
+        return null;
+    }
+    return new ethers.Contract(CONFIG.commentVaultAddress, COMMENT_VAULT_ABI, provider);
+}
+
+/**
+ * 获取 CommentVault 合约实例（用于写操作）
+ * @returns {ethers.Contract|null}
+ */
+function getCommentVaultContractWithSigner() {
+    if (!signer || !CONFIG.commentVaultAddress) {
+        console.warn('[留言] CommentVault 合约地址未配置或未连接钱包');
+        return null;
+    }
+    if (COMMENT_VAULT_ABI.length === 0) {
+        console.warn('[留言] CommentVault ABI 未加载');
+        return null;
+    }
+    return new ethers.Contract(CONFIG.commentVaultAddress, COMMENT_VAULT_ABI, signer);
+}
+
+/**
+ * 将字符串转换为 bytes32（用于 action 和 txHash）
+ * @param {string} str
+ * @returns {string} bytes32 hex string
+ */
+function stringToBytes32(str) {
+    if (!str || str === '') return ethers.constants.HashZero;
+    try {
+        // 如果是交易哈希（0x开头，66字符），直接转换为 bytes32
+        if (str.startsWith('0x') && str.length === 66) {
+            return ethers.utils.hexZeroPad(str, 32);
+        }
+        // 如果是短字符串（action），格式化为 bytes32（最多31字符）
+        if (str.length <= 31) {
+            return ethers.utils.formatBytes32String(str);
+        }
+        // 如果字符串太长，截断并转换
+        return ethers.utils.formatBytes32String(str.slice(0, 31));
+    } catch (e) {
+        console.warn('[留言] 转换 bytes32 失败:', e);
+        return ethers.constants.HashZero;
+    }
+}
+
+/**
+ * 将 bytes32 转换为字符串
+ * @param {string} bytes32Str
+ * @returns {string}
+ */
+function bytes32ToString(bytes32Str) {
+    if (!bytes32Str || bytes32Str === ethers.constants.HashZero) return '';
+    try {
+        // 尝试解析为字符串
+        return ethers.utils.parseBytes32String(bytes32Str);
+    } catch (e) {
+        // 如果不是有效字符串，尝试作为 hex 处理
+        try {
+            const hex = bytes32Str.replace(/^0x/, '');
+            // 移除尾部的 0
+            const trimmed = hex.replace(/0+$/, '');
+            if (trimmed.length === 0) return '';
+            // 尝试转换为字符串
+            return ethers.utils.toUtf8String('0x' + trimmed);
+        } catch (e2) {
+            return '';
+        }
+    }
+}
+
+/**
+ * 从链上加载指定金库的留言列表（按时间倒序）
+ * @param {string} vaultAddr
+ * @returns {Promise<Array<{timestamp: number, userAddress: string, action: string, message: string, txHash?: string, blockNumber: number}>>}
+ */
+async function loadComments(vaultAddr) {
+    if (!vaultAddr || !provider) return [];
+    
+    const contract = getCommentVaultContract();
+    if (!contract) return [];
+    
+    try {
+        // 获取留言数量
+        const count = await contract.getCommentCount(vaultAddr);
+        if (count.eq(0)) return [];
+        
+        // 获取所有留言（如果数量不多，一次性获取；否则分页）
+        let comments = [];
+        if (count.lte(100)) {
+            // 数量少，一次性获取
+            const allComments = await contract.getAllComments(vaultAddr);
+            comments = allComments;
+        } else {
+            // 数量多，分页获取最新的
+            const limit = 100;
+            const commentsData = await contract.getComments(vaultAddr, 0, limit);
+            comments = commentsData;
+        }
+        
+        // 转换为前端格式（最新的在前）
+        return comments.map(c => {
+            const action = bytes32ToString(c.action);
+            let txHash = '';
+            if (c.txHash && c.txHash !== ethers.constants.HashZero) {
+                // 从 bytes32 恢复交易哈希（移除前导0）
+                const hex = c.txHash.replace(/^0x/, '');
+                // 移除前导0，恢复原始哈希（交易哈希应该是64个字符）
+                const trimmed = hex.replace(/^0+/, '');
+                if (trimmed.length >= 2) { // 至少要有2个字符（0x + 至少1个字符）
+                    txHash = '0x' + trimmed.padStart(64, '0');
+                }
+            }
+            
+            return {
+                timestamp: c.timestamp.toNumber() * 1000, // 转换为毫秒
+                userAddress: c.user,
+                action: action || '',
+                message: c.message || '',
+                txHash: txHash || '',
+                blockNumber: c.blockNumber.toNumber()
+            };
+        }).reverse(); // 反转，最新的在前
+    } catch (error) {
+        console.error('[留言] 从链上加载失败:', error);
+        return [];
+    }
+}
+
+/**
+ * 保存一条留言到链上
+ * @param {string} vaultAddr
+ * @param {string} userAddress
+ * @param {string} action - 'deposit' | 'vote' | 'donate' | 'withdraw'
+ * @param {string} message
+ * @param {string} [txHash]
+ * @returns {Promise<string>} 交易哈希
+ */
+async function saveComment(vaultAddr, userAddress, action, message, txHash) {
+    if (!vaultAddr || !userAddress || !message) {
+        throw new Error('参数不完整');
+    }
+    
+    const contract = getCommentVaultContractWithSigner();
+    if (!contract) {
+        throw new Error('CommentVault 合约未配置或未连接钱包');
+    }
+    
+    // 检查留言长度
+    if (message.length > 200) {
+        throw new Error('留言过长，最多200个字符');
+    }
+    
+    // 转换为 bytes32
+    const actionBytes32 = stringToBytes32(action || '');
+    const txHashBytes32 = txHash ? stringToBytes32(txHash) : ethers.constants.HashZero;
+    
+    // 调用合约
+    const tx = await contract.addComment(
+        vaultAddr,
+        message,
+        actionBytes32,
+        txHashBytes32
+    );
+    
+    // 等待交易确认
+    await safeWaitForTransaction(tx);
+    
+    return tx.hash;
+}
+
+/**
+ * 提交留言（来自留言墙或操作成功后的提示）
+ */
+async function submitComment() {
+    const input = document.getElementById('commentInput');
+    const addr = vaultAddress;
+    if (!addr) return;
+
+    if (!walletAddress || !signer) {
+        showModal('请先连接钱包', '留言将显示您的钱包地址，请先连接钱包后再发送。');
+        return;
+    }
+
+    const message = (input?.value || '').trim();
+    if (!message) {
+        showModal('留言不能为空', '请输入留言内容');
+        return;
+    }
+    
+    if (message.length > 200) {
+        showModal('留言过长', '留言最多200个字符');
+        return;
+    }
+
+    const ctx = pendingCommentContext;
+    const action = ctx?.action || '';
+    const txHash = ctx?.txHash || '';
+
+    try {
+        showLoading('正在提交留言到链上...');
+        
+        const commentTxHash = await saveComment(addr, walletAddress, action, message, txHash);
+        console.log('✓ 留言已上链:', commentTxHash);
+        
+        hideLoading();
+        showModal('留言成功', `您的留言已成功提交到链上！\n\n交易哈希: ${commentTxHash}`);
+        
+        if (input) input.value = '';
+        // 不清空pendingCommentContext，保留以便后续分享
+        updateCommentCharCount();
+
+        // 重新加载留言列表
+        await renderComments(addr);
+    } catch (error) {
+        hideLoading();
+        console.error('提交留言失败:', error);
+        
+        let errorMsg = '留言提交失败，请重试';
+        if (error.message) {
+            if (error.message.includes('user rejected') || error.message.includes('User denied')) {
+                errorMsg = '您取消了交易';
+            } else if (error.message.includes('Message too long')) {
+                errorMsg = '留言过长，最多200个字符';
+            } else if (error.message.includes('CommentVault 合约未配置')) {
+                errorMsg = '留言功能未配置，请联系管理员';
+            } else {
+                errorMsg = `提交失败: ${error.message}`;
+            }
+        }
+        
+        showModal('留言失败', errorMsg);
+    }
+}
+
+function updateCommentCharCount() {
+    const input = document.getElementById('commentInput');
+    const el = document.getElementById('commentCharCount');
+    if (!input || !el) return;
+    const n = (input.value || '').length;
+    el.textContent = `${n}/200`;
+}
+
+// ===== 分享到 X（Twitter） =====
+const TWITTER_INTENT = 'https://twitter.com/intent/tweet';
+const TWITTER_MAX_LEN = 280;
+
+function getVaultPageUrl() {
+    const base = window.location.origin + window.location.pathname;
+    const q = vaultAddress ? `?vault=${encodeURIComponent(vaultAddress)}` : '';
+    return base + q;
+}
+
+/**
+ * 生成金库信息分享文案（≤280 字符）
+ * @param {string} [url] - 可选的金库页面 URL
+ */
+function generateVaultShareText(url) {
+    const m = vaultShareMeta;
+    const name = m.displayName || 'ConsensusVault';
+    const status = m.consensusReached ? '已解锁' : '锁定中';
+    const deposits = m.totalDeposits || '0';
+    const tokenSymbol = m.tokenSymbol || '';
+    const participants = m.participantCount || 0;
+    const depositsText = tokenSymbol ? `总存款 ${deposits} ${tokenSymbol}` : `总存款 ${deposits}`;
+    // 新格式：我在 @Consensus_Vault的<name>USDT金库 | 状态 | 总存款 | 参与人数
+    let text = `我在 @Consensus_Vault的<${name}>${tokenSymbol}金库 | ${status} | ${depositsText} | ${participants} 人参与`;
+    
+    // 如果提供了 URL，添加到文本中（单独一行，前面有空格）
+    if (url) {
+        text += `\n ${url}`;
+    }
+    
+    // 确保不超过 Twitter 最大长度
+    if (text.length > TWITTER_MAX_LEN) {
+        // 如果超长，先截断主文本，保留 URL
+        const maxMainTextLength = url ? TWITTER_MAX_LEN - url.length - 2 : TWITTER_MAX_LEN - 3;
+        const mainText = text.split('\n')[0];
+        if (mainText.length > maxMainTextLength) {
+            text = mainText.slice(0, maxMainTextLength - 3) + '…';
+            if (url) {
+                text += `\n ${url}`;
+            }
+        }
+    }
+    
+    return text;
+}
+
+/**
+ * 生成操作结果分享文案（≤280 字符）
+ * @param {string} action - 'deposit' | 'vote' | 'donate' | 'withdraw'
+ * @param {string} [amount]
+ * @param {string} [txHash]
+ */
+function generateActionShareText(action, amount, txHash) {
+    const labels = { deposit: '存款', vote: '投票', donate: '捐赠', withdraw: '提现' };
+    const label = labels[action] || action;
+    const m = vaultShareMeta;
+    const name = m.displayName || 'ConsensusVault';
+    let part = amount ? ` ${amount}` : '';
+    let text = `刚刚在 ConsensusVault 完成${label}${part} · ${name}\n\n#ConsensusVault`;
+    if (txHash) {
+        const shortTx = txHash.slice(0, 10) + '…' + txHash.slice(-8);
+        text += `\nTx: ${shortTx}`;
+    }
+    if (text.length > TWITTER_MAX_LEN) {
+        text = text.slice(0, TWITTER_MAX_LEN - 3) + '…';
+    }
+    return text;
+}
+
+/**
+ * 打开 Twitter 发推意图页
+ * @param {string} text
+ * @param {string} [url]
+ */
+function shareToTwitter(text, url) {
+    const u = new URL(TWITTER_INTENT);
+    u.searchParams.set('text', (text || '').slice(0, TWITTER_MAX_LEN));
+    if (url) u.searchParams.set('url', url);
+    window.open(u.toString(), '_blank', 'noopener,noreferrer');
 }
 
 // ===== 价格查询功能（DexScreener API） =====
@@ -588,6 +934,7 @@ async function switchNetwork(network) {
         currentNetwork = network;
         CONFIG = { ...NETWORKS[network] };
         VAULT_FACTORY_ADDRESS = CONFIG.factoryAddress;
+        // CommentVault 地址也会自动更新（从 CONFIG.commentVaultAddress 读取）
 
         // 2. 保存到 localStorage
         localStorage.setItem('selectedNetwork', network);
@@ -722,6 +1069,9 @@ async function init() {
         console.log('✓ 使用固定 RPC 进行只读操作:', CONFIG.rpcUrl);
         console.log('✓ 当前网络:', CONFIG.displayName);
 
+        // 立即渲染留言墙（从链上加载）
+        renderComments(vaultAddress);
+
         const walletProvider = getWalletProvider();
         if (walletProvider) {
             console.log('当前域名:', window.location.origin);
@@ -761,9 +1111,10 @@ async function init() {
 
 async function loadABIs() {
     try {
-        const [factoryRes, vaultRes] = await Promise.all([
+        const [factoryRes, vaultRes, commentRes] = await Promise.all([
             fetch('./abi/ConsensusVaultFactory.json'),
-            fetch('./abi/ConsensusVault.json')
+            fetch('./abi/ConsensusVault.json'),
+            fetch('./abi/CommentVault.json').catch(() => null) // CommentVault ABI 可选
         ]);
 
         const [factoryData, vaultData] = await Promise.all([
@@ -777,6 +1128,14 @@ async function loadABIs() {
         // 3. [...] 直接数组格式
         VAULT_FACTORY_ABI = factoryData.abi || factoryData;
         CONSENSUS_VAULT_ABI = vaultData.abi || vaultData;
+        
+        // CommentVault ABI（如果存在）
+        if (commentRes && commentRes.ok) {
+            const commentData = await commentRes.json();
+            COMMENT_VAULT_ABI = commentData.abi || commentData;
+        } else {
+            console.warn('[留言] CommentVault ABI 未找到，留言功能可能不可用');
+        }
 
         // 确保都是数组
         if (!Array.isArray(VAULT_FACTORY_ABI)) {
@@ -784,6 +1143,9 @@ async function loadABIs() {
         }
         if (!Array.isArray(CONSENSUS_VAULT_ABI)) {
             console.error('CONSENSUS_VAULT_ABI 不是数组:', typeof CONSENSUS_VAULT_ABI);
+        }
+        if (COMMENT_VAULT_ABI.length > 0 && !Array.isArray(COMMENT_VAULT_ABI)) {
+            console.error('COMMENT_VAULT_ABI 不是数组:', typeof COMMENT_VAULT_ABI);
         }
 
         console.log('✓ ABI 加载成功');
@@ -960,6 +1322,8 @@ async function loadVaultDetails() {
                 const iconHTML = '<i class="fas fa-vault"></i>';
                 titleEl.innerHTML = `${iconHTML} ${displayName} 金库详情`;
             }
+            vaultShareMeta.displayName = displayName;
+            vaultShareMeta.tokenSymbol = tokenSymbol;
         } catch (e) {
             console.warn('读取金库信息失败，保留默认标题', e);
         }
@@ -1004,6 +1368,9 @@ async function loadVaultDetails() {
         if (elem('totalDeposits')) elem('totalDeposits').textContent = formatPrecise(totalPrincipalNum);
         if (elem('yesVotes')) elem('yesVotes').textContent = formatPrecise(totalVoteWeightNum);
         if (elem('participantCount')) elem('participantCount').textContent = participantCount.toString();
+        vaultShareMeta.totalDeposits = formatPrecise(totalPrincipalNum);
+        vaultShareMeta.participantCount = participantCount;
+        vaultShareMeta.consensusReached = consensusReached;
         if (elem('progressPercent')) elem('progressPercent').textContent = progressPercent.toFixed(1) + '%';
         if (elem('progressFill')) elem('progressFill').style.width = Math.min(progressPercent, 100) + '%';
 
@@ -1387,6 +1754,49 @@ function formatAddress(addr) {
     return addr.slice(0, 6) + '...' + addr.slice(-4);
 }
 
+const ACTION_LABELS = { deposit: '存款', vote: '投票', donate: '捐赠', withdraw: '提现' };
+
+/**
+ * 渲染留言列表并更新计数（从链上加载）
+ * @param {string} vaultAddr
+ */
+async function renderComments(vaultAddr) {
+    const listEl = document.getElementById('commentsList');
+    const countEl = document.getElementById('commentCount');
+    if (!listEl) return;
+
+    // 从链上加载留言
+    const comments = await loadComments(vaultAddr || vaultAddress);
+    if (countEl) countEl.textContent = `(${comments.length})`;
+
+    if (!comments.length) {
+        listEl.innerHTML = '<p class="comments-empty">暂无留言，来写下第一条吧～</p>';
+        return;
+    }
+
+    const explorerUrl = CONFIG.explorer;
+    let html = '';
+    comments.forEach((c) => {
+        const addr = formatAddress(c.userAddress);
+        const action = ACTION_LABELS[c.action] || c.action || '—';
+        const time = c.timestamp ? new Date(c.timestamp).toLocaleString() : '—';
+        const msg = (c.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+        const txLink = c.txHash && explorerUrl
+            ? `<a href="${explorerUrl}/tx/${c.txHash}" target="_blank" rel="noopener" class="comment-tx-link">链上哈希</a>`
+            : '';
+        html += `<div class="comment-card">
+            <div class="comment-meta">
+                <span class="comment-addr">${addr}</span>
+                <span class="comment-action">${action}</span>
+                <span class="comment-time">${time}</span>
+                ${txLink}
+            </div>
+            ${msg ? `<div class="comment-body">${msg}</div>` : ''}
+        </div>`;
+    });
+    listEl.innerHTML = html;
+}
+
 function setupEventListeners() {
     // 网络切换下拉菜单
     const networkSelect = document.getElementById('networkSwitch');
@@ -1431,6 +1841,16 @@ function setupEventListeners() {
         backBtn.addEventListener('click', (e) => {
             e.preventDefault();
             goBack();
+        });
+    }
+
+    // 分享金库到 X
+    const shareVaultBtn = document.getElementById('shareVaultBtn');
+    if (shareVaultBtn) {
+        shareVaultBtn.addEventListener('click', () => {
+            const url = getVaultPageUrl();
+            const text = generateVaultShareText(url);
+            shareToTwitter(text); // URL 已包含在 text 中，不再单独传递
         });
     }
 
@@ -1519,6 +1939,45 @@ function setupEventListeners() {
         }
         await donate(amount);
     });
+
+    // 留言：字数统计
+    const commentInput = document.getElementById('commentInput');
+    const commentCharCount = document.getElementById('commentCharCount');
+    if (commentInput && commentCharCount) {
+        const updateCharCount = () => {
+            const n = (commentInput.value || '').length;
+            commentCharCount.textContent = `${n}/200`;
+        };
+        commentInput.addEventListener('input', updateCharCount);
+        commentInput.addEventListener('paste', () => setTimeout(updateCharCount, 0));
+        updateCharCount();
+    }
+
+    // 留言：提交
+    addButtonHandler('submitCommentBtn', () => submitComment());
+
+    // 留言区分享按钮（当有pendingCommentContext时显示）
+    const commentShareBtn = document.getElementById('commentShareBtn');
+    if (commentShareBtn) {
+        const updateCommentShareBtn = () => {
+            if (pendingCommentContext && pendingCommentContext.txHash) {
+                commentShareBtn.style.display = 'inline-flex';
+            } else {
+                commentShareBtn.style.display = 'none';
+            }
+        };
+        commentShareBtn.addEventListener('click', () => {
+            if (pendingCommentContext) {
+                const text = generateActionShareText(pendingCommentContext.action, pendingCommentContext.amount, pendingCommentContext.txHash);
+                shareToTwitter(text, getVaultPageUrl());
+            }
+        });
+        // 初始检查
+        updateCommentShareBtn();
+        // 使用MutationObserver或定期检查（简化：在关键位置调用updateCommentShareBtn）
+        // 在showSuccessWithCommentAndShare中已经会更新显示，这里作为后备
+        window.updateCommentShareBtn = updateCommentShareBtn;
+    }
 
     // ===== 二级市场交易 =====
     // 转移功能已移除 - 用户可在钱包或DEX(PancakeSwap等)中转移VToken
@@ -1616,7 +2075,11 @@ function showModal(title, message, options = {}) {
     const bodyEl = overlay.querySelector('.modal-body');
 
     if (titleEl) titleEl.textContent = title;
-    if (bodyEl) bodyEl.textContent = message;
+    if (options.htmlBody != null) {
+        bodyEl.innerHTML = options.htmlBody;
+    } else {
+        bodyEl.textContent = message;
+    }
 
     overlay.style.display = 'flex'; // 使用 flex 确保正确显示
 
@@ -1629,14 +2092,15 @@ function showModal(title, message, options = {}) {
             resolve();
         };
 
+        if (typeof options.onRender === 'function') {
+            options.onRender(bodyEl, closeModal);
+        }
+
         // 手动关闭按钮 - 支持点击和触摸事件
         const closeBtn = overlay.querySelector('.modal-close');
         if (closeBtn) {
-            // 移除旧的事件监听器，添加新的
             const newCloseBtn = closeBtn.cloneNode(true);
             closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-
-            // 同时支持点击和触摸事件（移动端兼容）
             newCloseBtn.addEventListener('click', closeModal);
             newCloseBtn.addEventListener('touchend', (e) => {
                 e.preventDefault();
@@ -1646,16 +2110,10 @@ function showModal(title, message, options = {}) {
 
         // 点击背景关闭 - 支持点击和触摸事件
         const handleOverlayClick = (e) => {
-            if (e.target === overlay) {
-                closeModal();
-            }
+            if (e.target === overlay) closeModal();
         };
-
-        // 移除旧的事件监听器
         overlay.removeEventListener('click', handleOverlayClick);
         overlay.removeEventListener('touchend', handleOverlayClick);
-
-        // 添加新的事件监听器
         overlay.addEventListener('click', handleOverlayClick);
         overlay.addEventListener('touchend', (e) => {
             if (e.target === overlay) {
@@ -1664,12 +2122,219 @@ function showModal(title, message, options = {}) {
             }
         });
 
-        // 如果设置了自动关闭时间
         if (options.autoClose) {
-            setTimeout(() => {
-                closeModal();
-            }, options.autoClose);
+            setTimeout(closeModal, options.autoClose);
         }
+    });
+}
+
+/**
+ * 生成默认分享/留言内容
+ * @param {{ action: string, amount?: string, txHash?: string }} ctx
+ * @returns {string}
+ */
+function generateDefaultShareText(ctx) {
+    if (!ctx) return '';
+    const actionLabels = { deposit: '存款', vote: '投票', donate: '捐赠', withdraw: '提现' };
+    const actionLabel = actionLabels[ctx.action] || ctx.action;
+    const vaultName = vaultShareMeta.displayName || 'ConsensusVault';
+    const tokenSymbol = vaultShareMeta.tokenSymbol || '';
+    const amountPart = ctx.amount && tokenSymbol
+        ? `，金额：${ctx.amount} ${tokenSymbol}`
+        : ctx.amount ? `，金额：${ctx.amount}` : '';
+    const line3 = `完成了${actionLabel}操作${amountPart}`;
+    const line4 = ctx.txHash ? `链上哈希：${ctx.txHash}` : '';
+    if (line4) {
+        return `我刚在@Consensus_Vault\n<${vaultName}> 金库\n${line3}\n${line4}`;
+    }
+    return `我刚在@Consensus_Vault\n<${vaultName}> 金库\n${line3}`;
+}
+
+/**
+ * 仅关闭弹窗时保存的简短留言（如 "存款 1000 USDT"）
+ * @param {{ action: string, amount?: string }} ctx
+ * @returns {string}
+ */
+function shortCommentForClose(ctx) {
+    if (!ctx) return '';
+    const actionLabels = { deposit: '存款', vote: '投票', donate: '捐赠', withdraw: '提现' };
+    const label = actionLabels[ctx.action] || ctx.action;
+    const tokenSymbol = vaultShareMeta.tokenSymbol || '';
+    if ((ctx.action === 'deposit' || ctx.action === 'donate' || ctx.action === 'withdraw') && ctx.amount && tokenSymbol) {
+        return `${label} ${ctx.amount} ${tokenSymbol}`;
+    }
+    if ((ctx.action === 'deposit' || ctx.action === 'donate' || ctx.action === 'withdraw') && ctx.amount) {
+        return `${label} ${ctx.amount}`;
+    }
+    return label;
+}
+
+/**
+ * 操作成功后弹窗：输入框 + 留言按钮 + 分享到 X 按钮
+ * @param {string} title
+ * @param {string} message
+ * @param {{ action: string, amount?: string, txHash?: string }} ctx
+ */
+function showSuccessWithCommentAndShare(title, message, ctx) {
+    pendingCommentContext = ctx ? { action: ctx.action, amount: ctx.amount, txHash: ctx.txHash } : null;
+    
+    // 生成默认内容
+    const defaultText = generateDefaultShareText(ctx);
+    
+    const safe = (message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    const html = `
+        <p class="modal-success-message">${safe}</p>
+        <div class="modal-share-input-area">
+            <label for="modalShareInput" style="display: block; margin-bottom: 8px; font-size: 13px; color: var(--text-muted);">编辑分享内容：</label>
+            <textarea id="modalShareInput" class="modal-share-input" rows="4" maxlength="200" placeholder="编辑分享内容...">${defaultText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+            <div class="modal-share-char-count">
+                <span id="modalShareCharCount">${defaultText.length}/200</span>
+            </div>
+        </div>
+        <div class="modal-success-actions">
+            <button type="button" id="modalBtnComment" class="btn btn-primary"><i class="fas fa-comment"></i> 留言</button>
+            <button type="button" id="modalBtnShare" class="btn btn-primary"><i class="fab fa-x-twitter"></i> 分享到 X</button>
+        </div>`;
+    
+    let hasClickedComment = false;
+    let modalInput = null;
+    
+    // 保存留言（长文案，用输入框内容）
+    const saveCommentLong = async () => {
+        if (!ctx || !vaultAddress || !walletAddress || !signer || hasClickedComment) return;
+        try {
+            let text = (modalInput?.value || '').trim() || defaultText;
+            if (!text) return;
+            
+            // 截断到200个字符（智能合约限制）
+            if (text.length > 200) {
+                text = text.substring(0, 200);
+                // 更新输入框显示截断后的内容
+                if (modalInput) {
+                    modalInput.value = text;
+                    // 更新字符计数
+                    const charCount = document.querySelector('#modalShareCharCount');
+                    if (charCount) {
+                        charCount.textContent = `200/200`;
+                    }
+                }
+            }
+            
+            showLoading('正在提交留言到链上...');
+            await saveComment(vaultAddress, walletAddress, ctx.action, text, ctx.txHash);
+            hideLoading();
+            await renderComments(vaultAddress);
+            hasClickedComment = true;
+        } catch (error) {
+            hideLoading();
+            console.error('保存留言失败:', error);
+            showModal('留言失败', error.message || '提交留言时发生错误');
+        }
+    };
+    
+    // 仅关闭时保存的短文案（如 "存款 1000 USDT"）
+    const saveCommentShortOnClose = async () => {
+        if (!ctx || !vaultAddress || !walletAddress || !signer || hasClickedComment) return;
+        try {
+            const text = shortCommentForClose(ctx);
+            if (!text) return;
+            
+            // 静默保存，不显示加载提示
+            await saveComment(vaultAddress, walletAddress, ctx.action, text, ctx.txHash);
+            await renderComments(vaultAddress);
+        } catch (error) {
+            console.warn('自动保存留言失败:', error);
+            // 静默失败，不打扰用户
+        }
+    };
+    
+    showModal(title, '', {
+        htmlBody: html,
+        onRender(bodyEl, closeModal) {
+            const input = bodyEl.querySelector('#modalShareInput');
+            const charCount = bodyEl.querySelector('#modalShareCharCount');
+            const btnComment = bodyEl.querySelector('#modalBtnComment');
+            const btnShare = bodyEl.querySelector('#modalBtnShare');
+            
+            modalInput = input;
+            
+            if (input && charCount) {
+                const updateCharCount = () => {
+                    let value = input.value || '';
+                    const n = value.length;
+                    
+                    // 如果超过200字符，截断并更新输入框
+                    if (n > 200) {
+                        value = value.substring(0, 200);
+                        input.value = value;
+                        charCount.textContent = `200/200`;
+                        charCount.style.color = 'var(--warning, #ff6b6b)';
+                    } else {
+                        charCount.textContent = `${n}/200`;
+                        // 接近限制时显示警告色
+                        if (n >= 180) {
+                            charCount.style.color = 'var(--warning, #ff6b6b)';
+                        } else {
+                            charCount.style.color = '';
+                        }
+                    }
+                };
+                
+                // 监听输入事件，实时限制长度
+                input.addEventListener('input', (e) => {
+                    if (input.value.length > 200) {
+                        input.value = input.value.substring(0, 200);
+                    }
+                    updateCharCount();
+                });
+                
+                // 监听粘贴事件，防止粘贴超长内容
+                input.addEventListener('paste', (e) => {
+                    setTimeout(() => {
+                        if (input.value.length > 200) {
+                            input.value = input.value.substring(0, 200);
+                        }
+                        updateCharCount();
+                    }, 0);
+                });
+                
+                updateCharCount();
+            }
+            
+            const disableBtn = (btn) => {
+                if (!btn) return;
+                btn.disabled = true;
+                btn.classList.add('btn-disabled');
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            };
+            
+            // 留言：只保存，不关弹窗；仅留言按钮变灰失效
+            if (btnComment) {
+                btnComment.addEventListener('click', async () => {
+                    await saveCommentLong();
+                    disableBtn(btnComment);
+                });
+                btnComment.addEventListener('touchend', async (e) => { 
+                    e.preventDefault(); 
+                    await saveCommentLong();
+                    disableBtn(btnComment);
+                });
+            }
+            
+            // 分享：只分享，不关弹窗；文案已含金库地址，不再传 url 避免重复；仅分享按钮变灰失效
+            if (btnShare) {
+                btnShare.addEventListener('click', () => {
+                    const text = (input?.value || '').trim() || defaultText;
+                    shareToTwitter(text);
+                    disableBtn(btnShare);
+                });
+                btnShare.addEventListener('touchend', (e) => { e.preventDefault(); btnShare.click(); });
+            }
+        }
+    }).then(() => {
+        // 仅当用户直接关闭弹窗（未点留言）时，保存短文案如 "存款 1000 USDT"
+        saveCommentShortOnClose();
     });
 }
 
@@ -1808,7 +2473,7 @@ async function deposit(amount) {
         }
 
         hideLoading();
-        showModal('存款成功', `已成功存款 ${amount}\n\n欢迎参与投票来支持这个金库的共识。`);
+        showSuccessWithCommentAndShare('存款成功', `已成功存款 ${amount}\n\n欢迎参与投票来支持这个金库的共识。`, { action: 'deposit', amount, txHash: depositTx.hash });
         document.getElementById('depositAmount').value = '';
 
         // 刷新数据
@@ -1888,7 +2553,7 @@ async function vote() {
         console.log('✓ 投票成功');
 
         hideLoading();
-        showModal('投票成功', '已成功投票支持共识！\n\n如果共识达成，金库将解锁，您可以提现本金和收益。');
+        showSuccessWithCommentAndShare('投票成功', '已成功投票支持共识！\n\n如果共识达成，金库将解锁，您可以提现本金和收益。', { action: 'vote', txHash: voteTx.hash });
 
         // 刷新数据
         await loadVaultDetails();
@@ -1985,7 +2650,8 @@ async function withdraw() {
         }
 
         hideLoading();
-        showModal('提现成功', '已成功提现全部本金和收益');
+        const totalAmountStr = formatTokenAmount(expectedAmount, tokenDecimals);
+        showSuccessWithCommentAndShare('提现成功', '已成功提现全部本金和收益', { action: 'withdraw', amount: totalAmountStr, txHash: withdrawTx.hash });
 
         // 【Dust监控】提现后检查
         try {
@@ -2110,7 +2776,7 @@ async function donate(amount) {
         console.log('✓ 捐赠成功');
 
         hideLoading();
-        showModal('捐赠成功', `已成功捐赠 ${amount}，感谢您的支持！`);
+        showSuccessWithCommentAndShare('捐赠成功', `已成功捐赠 ${amount}，感谢您的支持！`, { action: 'donate', amount, txHash: donateTx.hash });
         document.getElementById('donateAmount').value = '';
 
         // 刷新数据（包括用户分红信息）

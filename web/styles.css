@@ -16,8 +16,9 @@
     --text-muted: #c7ccda;
     --accent: #ff7a1a;
     --accent-2: #7c5cff;
+    --accent-glow: rgba(255, 122, 26, 0.3);
     --success: #22c55e;
-    --danger: #ef4444;
+    --danger: #ff3333;
     --shadow: rgba(0, 0, 0, 0.35);
 
     /* 赛博朋克字体 */
@@ -88,6 +89,16 @@ body::before {
     margin: 0 auto;
     padding: 0 20px;
 }
+
+.container.vault-detail-container {
+    width: 46%;
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 0 20px;
+    overflow-x: hidden;
+    box-sizing: border-box;
+}
+
 
 /* ===== 3. 排版样式 ===== */
 h1,
@@ -513,6 +524,8 @@ input[type="number"] {
     transition: all 0.3s;
     font-family: var(--font-cyber-mono);
     letter-spacing: 0.03em;
+    box-sizing: border-box; /* 确保 padding 和 border 包含在高度内 */
+    height: 44px; /* 固定高度，与 p 标签一致 */
 }
 
 .input-large:focus,
@@ -566,6 +579,7 @@ select option {
     cursor: pointer;
     position: relative;
     overflow: hidden;
+    /* 保持 flex 布局，不改为 grid */
 }
 
 .vault-card::before {
@@ -586,7 +600,7 @@ select option {
 }
 
 .vault-card:hover::before {
-    animation: scanSweep 0.8s ease-in-out;
+    animation: scanSweep 1.2s ease-in-out; /* 恢复为更慢的扫频速度 */
 }
 
 @keyframes scanSweep {
@@ -668,7 +682,6 @@ select option {
     50% {
         opacity: 1;
     }
-}
 }
 
 .vault-status,
@@ -769,6 +782,152 @@ select option {
     gap: 8px;
     position: relative;
     z-index: 1;
+}
+
+/* ===== 9.1 金库卡片内部结构样式（对齐优化） ===== */
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center; /* 垂直居中，确保状态标签对齐 */
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    min-height: 48px; /* 最小高度，JavaScript会动态设置实际高度 */
+    position: relative;
+    z-index: 1;
+    gap: 12px; /* 添加间距，避免内容紧贴 */
+    transition: height 0.3s ease; /* 平滑过渡，与卡片其他效果保持一致 */
+}
+
+.card-header h3 {
+    font-size: 18px; /* 稍微增大字体，更醒目 */
+    font-weight: 700; /* 恢复原来的粗体，更符合赛博朋克风格 */
+    color: var(--text);
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden; /* 超出部分隐藏 */
+    white-space: nowrap; /* 单行显示，配合省略号 */
+    text-overflow: ellipsis; /* 超出部分显示省略号 */
+    font-family: var(--font-cyber-display);
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 10px rgba(255, 122, 26, 0.4); /* 增强发光效果，更符合原风格 */
+    line-height: 1.5; /* 稍微增加行高 */
+    text-transform: uppercase; /* 保持大写风格，更符合赛博朋克 */
+    cursor: help; /* 鼠标悬停时显示帮助光标，提示有完整名称 */
+    position: relative; /* 为自定义 tooltip 定位 */
+}
+
+/* 自定义 tooltip - 快速显示（延迟约0.25秒，比浏览器默认的1秒快很多） */
+.card-header h3[title]::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--font-cyber-regular);
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 4px 12px var(--shadow);
+    text-transform: none; /* tooltip 不转换大小写 */
+    letter-spacing: 0.03em;
+    pointer-events: none; /* 不阻挡鼠标事件 */
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.15s ease-out 0s, transform 0.15s ease-out 0s; /* 隐藏时立即（无延迟） */
+}
+
+.card-header h3[title]:hover::after {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.15s ease-out 0.25s, transform 0.15s ease-out 0.25s; /* 显示时延迟0.25秒 */
+}
+
+.card-header .status-badge {
+    flex-shrink: 0;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px; /* 图标和文字之间的间距 */
+    height: fit-content; /* 根据内容自适应高度 */
+}
+
+.card-body {
+    flex: 1;
+    margin-bottom: 12px;
+    position: relative;
+    z-index: 1;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    min-height: 24px; /* 确保所有行高度一致 */
+    gap: 12px; /* 添加间距 */
+}
+
+.info-row:last-child {
+    margin-bottom: 0;
+}
+
+.info-row .label {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-cyber-regular);
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+    width: 100px; /* 固定宽度，确保所有label宽度一致，让value对齐 */
+    margin-right: 0; /* 使用gap代替margin */
+    line-height: 1.4; /* 确保行高一致 */
+}
+
+.info-row .value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    font-family: var(--font-cyber-mono);
+    letter-spacing: 0.03em;
+    text-align: right;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 0 6px rgba(255, 122, 26, 0.3);
+    line-height: 1.4; /* 确保行高一致 */
+}
+
+.card-footer {
+    display: flex;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+    margin-top: auto; /* 确保footer在底部 */
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* 进度条在卡片中的样式 */
+.card-body .progress-bar {
+    margin-top: 12px;
+    margin-bottom: 6px;
+}
+
+.card-body .progress-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-cyber-mono);
+    letter-spacing: 0.03em;
+    text-align: center;
 }
 
 /* ===== 10. 表格样式 ===== */
@@ -1076,8 +1235,10 @@ select option {
     border-radius: 8px;
     padding: 16px;
     transition: all 0.3s;
-
-
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .feature-card:hover,
@@ -1093,10 +1254,10 @@ select option {
 
 .action-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 16px;
     margin-top: 24px;
-
+    align-items: stretch; /* 确保所有卡片高度一致 */
 }
 
 .action-header {
@@ -1106,18 +1267,59 @@ select option {
     margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
+    min-width: 0;
+    height: 48px; /* 固定高度，确保所有 header 对齐 */
+    flex-shrink: 0; /* 不收缩 */
 }
 
 .action-body {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-width: 0;
+    overflow: hidden;
+    flex: 1;
+}
+
+/* 确保 action-body 的第一个元素（input 或 p）高度一致 */
+.action-body > input.input-large,
+.action-body > p.text-muted:first-of-type {
+    height: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+}
+
+/* 确保投票和提现卡片的 p 标签与 input 样式一致 */
+.action-body p.text-muted {
+    margin: 0;
+    padding: 12px 16px;
+    height: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+    box-sizing: border-box;
+}
+
+/* 确保按钮对齐 */
+.action-body > button {
+    flex-shrink: 0; /* 按钮不收缩 */
+}
+
+/* 确保 small 标签对齐 */
+.action-body > small {
+    flex-shrink: 0; /* small 标签不收缩 */
+    min-height: 20px; /* 最小高度，即使为空也占位 */
 }
 
 /* ===== 17. 信息卡片 ===== */
 .vault-info-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 16px;
     margin-top: 24px;
 }
@@ -1127,6 +1329,8 @@ select option {
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .info-card label {
@@ -1257,6 +1461,11 @@ select option {
         width: 18px;
         height: 18px;
     }
+    
+    .logo-mark::before {
+        width: 5px;
+        height: 5px;
+    }
 
     .logo-text {
         font-size: 18px;
@@ -1303,7 +1512,7 @@ select option {
 }
 
 .btn.primary.connected {
-    background: linear-gradient(135deg, #ff7a1a, #7c5cff);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     cursor: pointer;
     opacity: 1;
 }
@@ -1400,4 +1609,281 @@ small {
 .vault-name {
     font-family: var(--font-cyber-display);
     letter-spacing: 0.08em;
+}
+
+/* ===== 留言区（赛博朋克风格） ===== */
+.comments-section {
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+
+.comments-section h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    font-family: var(--font-cyber-display);
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+}
+
+.comment-count {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    font-weight: 500;
+}
+
+.comment-input-area {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    transition: var(--transition);
+}
+
+.comment-input-area:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.15);
+}
+
+.comment-input {
+    width: 100%;
+    min-height: 72px;
+    padding: 8px 0;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--font-cyber-regular);
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+}
+
+.comment-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+.comment-input-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.comment-char-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-cyber-mono);
+}
+
+.comments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.comments-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    padding: 24px 16px;
+    font-family: var(--font-cyber-regular);
+}
+
+.comment-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    transition: var(--transition);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.comment-card:hover {
+    border-color: rgba(255, 122, 26, 0.4);
+    box-shadow: 0 0 12px rgba(255, 122, 26, 0.08);
+}
+
+.comment-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-family: var(--font-cyber-mono);
+    color: var(--text-muted);
+}
+
+.comment-addr {
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+
+.comment-action {
+    padding: 2px 6px;
+    background: rgba(124, 92, 255, 0.2);
+    color: var(--accent-2);
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.comment-time {
+    opacity: 0.85;
+}
+
+.comment-tx-link {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.comment-tx-link:hover {
+    text-decoration: underline;
+}
+
+.comment-body {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.5;
+    font-family: var(--font-cyber-regular);
+    letter-spacing: 0.03em;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ===== 分享按钮与成功弹窗 ===== */
+.vault-header-section {
+    margin-top: 24px;
+    margin-bottom: 16px;
+}
+
+.vault-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+}
+
+.vault-header-row .section-title {
+    margin-bottom: 0;
+    word-break: break-word;
+    white-space: normal;
+    min-width: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+}
+
+.btn-share-vault {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-cyber-regular);
+    letter-spacing: 0.04em;
+    transition: var(--transition);
+}
+
+.btn-share-vault:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 12px rgba(255, 122, 26, 0.15);
+}
+
+.modal-success-message {
+    margin-bottom: 16px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.modal-share-input-area {
+    margin-bottom: 16px;
+}
+
+.modal-share-input {
+    width: 100%;
+    min-height: 100px;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: var(--font-cyber-regular);
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    transition: var(--transition);
+}
+
+.modal-share-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.15);
+}
+
+.modal-share-char-count {
+    margin-top: 6px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-cyber-mono);
+}
+
+.modal-success-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.modal-success-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-share-modal {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.btn-share-modal:hover {
+    border-color: #1da1f2;
+    color: #1da1f2;
+    box-shadow: 0 0 12px rgba(29, 161, 242, 0.2);
+}
+
+.btn-share-comment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-cyber-regular);
+    letter-spacing: 0.03em;
+    transition: var(--transition);
+}
+
+.btn-share-comment:hover {
+    border-color: #1da1f2;
+    color: #1da1f2;
+    box-shadow: 0 0 8px rgba(29, 161, 242, 0.15);
 }

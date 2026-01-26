@@ -42,10 +42,15 @@
         <div class="container vault-detail-container">
             <!-- 金库头部信息 -->
             <section class="vault-header-section">
-                <h1 id="vaultTitle" class="section-title">
-                    <i class="fas fa-vault"></i>
-                    金库详情
-                </h1>
+                <div class="vault-header-row">
+                    <h1 id="vaultTitle" class="section-title">
+                        <i class="fas fa-vault"></i>
+                        金库详情
+                    </h1>
+                    <button type="button" id="shareVaultBtn" class="btn btn-share-vault" title="分享到 X">
+                        <i class="fab fa-x-twitter"></i> 分享到 X
+                    </button>
+                </div>
 
                 <div class="vault-info-grid">
                     <!-- 1. 金库状态（单独一排） -->
@@ -204,6 +209,33 @@
                 </div>
             </section>
 
+            <!-- 留言区 -->
+            <section class="comments-section" id="commentsSection">
+                <h2>
+                    <i class="fas fa-comments"></i>
+                    留言墙
+                    <span id="commentCount" class="comment-count">(0)</span>
+                </h2>
+                <div class="comment-input-area">
+                    <textarea id="commentInput" class="comment-input" placeholder="写下你的留言… 支持表情符号" rows="3"
+                        maxlength="200"></textarea>
+                    <div class="comment-input-actions">
+                        <span id="commentCharCount" class="comment-char-count">0/200</span>
+                        <div class="comment-action-buttons">
+                            <button type="button" id="commentShareBtn" class="btn btn-share-comment"
+                                style="display: none;" title="分享到 X">
+                                <i class="fab fa-x-twitter"></i> 分享
+                            </button>
+                            <button type="button" id="submitCommentBtn" class="btn btn-primary">
+                                <i class="fas fa-paper-plane"></i> 发送
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="commentsList" class="comments-list">
+                    <!-- 留言列表由 JS 渲染 -->
+                </div>
+            </section>
 
         </div>
         <!-- 页脚 -->

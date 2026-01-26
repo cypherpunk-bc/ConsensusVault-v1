@@ -13,7 +13,8 @@ const NETWORKS = {
         displayName: 'BSC 主网',
         rpcUrl: 'https://bsc-dataseed.bnbchain.org',
         explorer: 'https://bscscan.com',
-        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab' // 主网工厂合约地址（需要替换为实际地址）
+        factoryAddress: '0x2aBFa239b09A1D4B03c8F65Ef59e855D6bBf75Ab',// 主网工厂合约地址（需要替换为实际地址）
+        // 主网留言合约地址
     },
     testnet: {
         chainId: '0x61',
@@ -22,7 +23,8 @@ const NETWORKS = {
         displayName: 'BSC 测试网',
         rpcUrl: 'https://data-seed-prebsc-1-s1.binance.org:8545',
         explorer: 'https://testnet.bscscan.com',
-        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98' // 测试网工厂合约地址
+        factoryAddress: '0xc9FA3e06A09a5b6257546C6eB8De2868275A2f98', // 测试网工厂合约地址
+         // 测试网留言合约地址
     }
 };
 
@@ -359,7 +361,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
     try {
         // 确定 chainId
         const dexChainId = chainId || getDexScreenerChainId(CONFIG.chainIdDec);
-        
+
         // 确保 tokenAddress 是字符串格式
         const normalizedAddress = typeof tokenAddress === 'string' ? tokenAddress : tokenAddress.toString();
         const url = `https://api.dexscreener.com/token-pairs/v1/${dexChainId}/${normalizedAddress}`;
@@ -383,11 +385,11 @@ async function getTokenPrice(tokenAddress, chainId = null) {
 
         const data = await response.json();
         console.log(`[价格查询] 完整 API 响应:`, data);
-        
+
         // DexScreener API 返回数组格式的交易对列表
         let pairs = Array.isArray(data) ? data : (data.pairs || []);
         console.log(`[价格查询] API 返回 ${pairs.length} 个交易对`);
-        
+
         const bestPair = selectBestPair(pairs);
 
         if (!bestPair) {
@@ -400,7 +402,7 @@ async function getTokenPrice(tokenAddress, chainId = null) {
                     liquidity: p.liquidity?.usd
                 })));
             } else {
-                console.warn(`[价格查询] 响应中没有交易对数据`, { 
+                console.warn(`[价格查询] 响应中没有交易对数据`, {
                     isArray: Array.isArray(data),
                     dataKeys: Object.keys(data || {})
                 });
@@ -479,7 +481,7 @@ async function getTokenPricesBatch(tokenAddresses, chainId = null) {
                 batchSuccessCount++;
             }
         });
-        
+
         console.log(`[批量价格] 批次 ${Math.floor(i / batchSize) + 1}: ${batchSuccessCount}/${batch.length} 成功`);
 
         // 如果不是最后一批，等待一下避免超过速率限制
@@ -510,7 +512,7 @@ async function refreshAllVaultPrices() {
         });
 
         const priceMap = await getTokenPricesBatch(uniqueTokenAddresses);
-        
+
         let successCount = 0;
         let failCount = 0;
 
@@ -520,11 +522,11 @@ async function refreshAllVaultPrices() {
                 vault.priceData = priceMap.get(vault.depositToken);
                 if (vault.priceData) {
                     successCount++;
-                    
+
                     // 更新金库列表卡片（vault-total-value-）
                     const vaultAddressLower = vault.address.toLowerCase();
                     const valueEls = document.querySelectorAll(`[id*="vault-total-value-"]`);
-                    
+
                     valueEls.forEach(valueEl => {
                         if (valueEl.id.includes(vaultAddressLower) || valueEl.id.toLowerCase().includes(vaultAddressLower)) {
                             const totalValue = calculateTotalValue(vault.contractBalanceFormatted || vault.totalDepositsFormatted, vault.priceData.price);
@@ -536,7 +538,7 @@ async function refreshAllVaultPrices() {
                             }
                         }
                     });
-                    
+
                     // 更新用户金库卡片（user-vault-value-）
                     const userVaultEls = document.querySelectorAll(`[id*="user-vault-value-"]`);
                     userVaultEls.forEach(userVaultEl => {
@@ -545,7 +547,7 @@ async function refreshAllVaultPrices() {
                             const userVaultCard = userVaultEl.closest('.card-body');
                             if (userVaultCard) {
                                 // 从金库列表中找到对应的用户金库数据
-                                const participatedVault = userCache.participatedVaults?.find(v => 
+                                const participatedVault = userCache.participatedVaults?.find(v =>
                                     v.address.toLowerCase() === vault.address.toLowerCase()
                                 );
                                 if (participatedVault) {
@@ -1317,7 +1319,7 @@ async function getAllVaultAddresses(maxLimit = 100) {
  */
 function formatUserVaults(vaults) {
     const PRECISION = ethers.BigNumber.from('1000000000000'); // 1e12
-    
+
     return vaults
         .filter(vault => vault.userInfo && vault.userInfo.principal && vault.userInfo.principal.gt(0))
         .map(vault => {
@@ -1325,12 +1327,12 @@ function formatUserVaults(vaults) {
             const principal = vault.userInfo.principal;
             const rewardDebt = vault.userInfo.rewardDebt || ethers.BigNumber.from(0);
             const accRewardPerShare = vault.userInfo.accRewardPerShare || ethers.BigNumber.from(0);
-            
+
             // 计算用户获得的捐赠：pendingReward = (principal * accRewardPerShare) / PRECISION - rewardDebt
             const pendingRewardRaw = principal.mul(accRewardPerShare).div(PRECISION).sub(rewardDebt);
             const pendingReward = formatTokenAmount(pendingRewardRaw, decimals);
             const totalAmount = parseFloat(formatTokenAmount(principal, decimals)) + parseFloat(pendingReward);
-            
+
             return {
                 address: vault.address,
                 depositToken: vault.depositToken,
@@ -1390,7 +1392,7 @@ async function loadAllVaults() {
         const tokenBalanceInterface = new ethers.utils.Interface([
             'function balanceOf(address) view returns (uint256)'
         ]);
-        
+
         // 先获取所有金库的 depositToken 地址，然后查询余额
         // 注意：这里需要两轮查询，第一轮获取 depositToken，第二轮查询余额
         // 为了简化，我们在解码第一轮结果后再查询余额
@@ -1458,7 +1460,7 @@ async function loadAllVaults() {
                 try {
                     console.log(`📡 批量查询 ${balanceCalls.length} 个金库的合约余额...`);
                     const [, balanceReturnData] = await multicallContract.callStatic.aggregate(balanceCalls);
-                    
+
                     let balanceCallIndex = 0;
                     vaultDetails.forEach(vault => {
                         if (vault.depositToken && vault.depositToken !== ethers.constants.AddressZero) {
@@ -1580,7 +1582,7 @@ async function loadAllVaults() {
             getTokenPricesBatch(uniqueTokenAddresses).then(priceMap => {
                 let successCount = 0;
                 let failCount = 0;
-                
+
                 allVaults.forEach(vault => {
                     if (vault.depositToken && priceMap.has(vault.depositToken)) {
                         vault.priceData = priceMap.get(vault.depositToken);
@@ -1728,13 +1730,20 @@ function renderUserVaults() {
         const statusClass = vault.consensusReached ? 'status-unlocked' : 'status-active';
         const statusIcon = vault.consensusReached ? 'fa-unlock' : 'fa-lock';
         // 格式化显示名称：金库名字 + 代币symbol
-        const displayTitle = vault.vaultName && vault.vaultName.trim()
+        const fullDisplayTitle = vault.vaultName && vault.vaultName.trim()
             ? `${vault.vaultName} ${vault.tokenSymbol || 'TOKEN'}`
             : (vault.displayName || vault.tokenSymbol || 'TOKEN');
 
+        // 限制显示长度（30个字符），超出部分用省略号
+        const MAX_DISPLAY_LENGTH = 30;
+        const isTruncated = fullDisplayTitle.length > MAX_DISPLAY_LENGTH;
+        const displayTitle = isTruncated
+            ? fullDisplayTitle.substring(0, MAX_DISPLAY_LENGTH) + '...'
+            : fullDisplayTitle;
+
         card.innerHTML = `
             <div class="card-header">
-                <h3>${displayTitle}</h3>
+                <h3${isTruncated ? ` title="${fullDisplayTitle}"` : ''}>${displayTitle}</h3>
                 <span class="status-badge ${statusClass}"><i class="fas ${statusIcon}"></i> ${status}</span>
             </div>
             <div class="card-body">
@@ -1818,6 +1827,11 @@ function renderUserVaults() {
 
         grid.appendChild(card);
     });
+
+    // 同步卡片头部高度，确保对齐
+    setTimeout(() => {
+        syncCardHeaderHeights();
+    }, 100); // 延迟执行，确保DOM已更新
 
     // 渲染完成后立即刷新价格（不要等30秒）
     console.log('[我的金库] 渲染完成，立即刷新价格...');
@@ -1933,6 +1947,23 @@ function setupEventListeners() {
                     throw new Error('创建金库失败：未获取到有效的金库地址');
                 }
 
+                // 获取代币符号用于分享
+                let tokenSymbol = 'TOKEN';
+                try {
+                    const tokenContractForSymbol = new ethers.Contract(
+                        tokenAddr,
+                        ['function symbol() view returns (string)'],
+                        provider
+                    );
+                    tokenSymbol = await tokenContractForSymbol.symbol();
+                } catch (e) {
+                    console.warn('获取代币符号失败:', e);
+                }
+
+                // 生成显示名称
+                const displayName = vaultName && vaultName.trim() ? `${vaultName} ${tokenSymbol}` : tokenSymbol;
+                const vaultUrl = `${window.location.origin}/vault.html?vault=${result.vaultAddress}`;
+
                 // 检查用户输入的金库名称是否包含彩蛋关键词
                 console.log('检查彩蛋 - vaultName:', vaultName);
                 const hasEasterEgg = vaultName && vaultName.toLowerCase().includes("welcome to the jungle");
@@ -1941,16 +1972,10 @@ function setupEventListeners() {
                     console.log('彩蛋触发！');
                     const successMessage = `金库已创建！ 🎉 Easter Egg! Congratulations 🎉 You've discovered the Easter egg! You're gonna die!`;
                     // 彩蛋：用户手动关闭弹窗后再跳转（不自动关闭）
-                    showModal('创建成功', successMessage).then(() => {
-                        goToVaultDetail(result.vaultAddress);
-                    });
+                    showCreateSuccessModal('创建成功', successMessage, displayName, depositAmount, tokenSymbol, result.tx.hash, vaultUrl, result.vaultAddress, true);
                 } else {
                     console.log('彩蛋未触发 - vaultName 不包含关键词');
-                    showModal('创建成功', `金库已创建！`);
-                    // 普通情况：2秒后自动跳转
-                    setTimeout(() => {
-                        goToVaultDetail(result.vaultAddress);
-                    }, 2000);
+                    showCreateSuccessModal('创建成功', `金库已创建！`, displayName, depositAmount, tokenSymbol, result.tx.hash, vaultUrl, result.vaultAddress, false);
                 }
 
                 // 清空输入框
@@ -2085,7 +2110,11 @@ function showModal(title, message, options = {}) {
     const bodyEl = overlay.querySelector('.modal-body');
 
     if (titleEl) titleEl.textContent = title;
-    if (bodyEl) bodyEl.textContent = message;
+    if (options.htmlBody != null) {
+        bodyEl.innerHTML = options.htmlBody;
+    } else {
+        bodyEl.textContent = message;
+    }
 
     overlay.style.display = 'flex'; // 使用 flex 确保正确显示
 
@@ -2098,14 +2127,15 @@ function showModal(title, message, options = {}) {
             resolve();
         };
 
+        if (typeof options.onRender === 'function') {
+            options.onRender(bodyEl, closeModal);
+        }
+
         // 手动关闭按钮 - 支持点击和触摸事件（移动端兼容）
         const closeBtn = overlay.querySelector('.modal-close');
         if (closeBtn) {
-            // 移除旧的事件监听器，添加新的
             const newCloseBtn = closeBtn.cloneNode(true);
             closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
-
-            // 同时支持点击和触摸事件（移动端兼容）
             newCloseBtn.addEventListener('click', closeModal);
             newCloseBtn.addEventListener('touchend', (e) => {
                 e.preventDefault();
@@ -2114,19 +2144,287 @@ function showModal(title, message, options = {}) {
         }
 
         // 点击背景关闭
-        overlay.addEventListener('click', (e) => {
+        const handleOverlayClick = (e) => {
+            if (e.target === overlay) closeModal();
+        };
+        overlay.removeEventListener('click', handleOverlayClick);
+        overlay.addEventListener('click', handleOverlayClick);
+        overlay.addEventListener('touchend', (e) => {
             if (e.target === overlay) {
+                e.preventDefault();
                 closeModal();
             }
         });
 
-        // 如果设置了自动关闭时间
         if (options.autoClose) {
-            setTimeout(() => {
-                closeModal();
-            }, options.autoClose);
+            setTimeout(closeModal, options.autoClose);
         }
     });
+}
+
+/**
+ * 分享到 X（Twitter）
+ * @param {string} text
+ * @param {string} [url]
+ */
+function shareToTwitter(text, url) {
+    const TWITTER_INTENT = 'https://twitter.com/intent/tweet';
+    const TWITTER_MAX_LEN = 280;
+    const u = new URL(TWITTER_INTENT);
+    u.searchParams.set('text', (text || '').slice(0, TWITTER_MAX_LEN));
+    if (url) u.searchParams.set('url', url);
+    window.open(u.toString(), '_blank', 'noopener,noreferrer');
+}
+
+// ===== 留言功能（localStorage） =====
+const COMMENTS_STORAGE_KEY = 'consensusvault_comments';
+
+/**
+ * 规范化金库地址为存储 key（小写）
+ * @param {string} vaultAddr
+ * @returns {string}
+ */
+function commentsKey(vaultAddr) {
+    if (!vaultAddr || typeof vaultAddr !== 'string') return '';
+    return vaultAddr.toLowerCase();
+}
+
+/**
+ * 从 localStorage 读取全量留言数据
+ * @returns {Object.<string, Array>}
+ */
+function loadAllComments() {
+    try {
+        const raw = localStorage.getItem(COMMENTS_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return typeof parsed === 'object' && parsed !== null ? parsed : {};
+    } catch (e) {
+        console.warn('[留言] 读取失败:', e);
+        return {};
+    }
+}
+
+/**
+ * 持久化全量留言数据到 localStorage
+ * @param {Object.<string, Array>} data
+ */
+function saveAllComments(data) {
+    try {
+        localStorage.setItem(COMMENTS_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.warn('[留言] 存储失败:', e);
+    }
+}
+
+/**
+ * 保存一条留言到指定金库
+ * @param {string} vaultAddr
+ * @param {string} userAddress
+ * @param {string} action - 'create' | 'deposit' | 'vote' | 'donate' | 'withdraw'
+ * @param {string} message
+ * @param {string} [txHash]
+ */
+function saveComment(vaultAddr, userAddress, action, message, txHash) {
+    const key = commentsKey(vaultAddr);
+    if (!key) return;
+    const all = loadAllComments();
+    if (!Array.isArray(all[key])) all[key] = [];
+    const entry = {
+        timestamp: Date.now(),
+        userAddress: userAddress || '',
+        action: action || '',
+        message: (message || '').trim(),
+        txHash: txHash || ''
+    };
+    all[key].push(entry);
+    saveAllComments(all);
+}
+
+/**
+ * 生成创建金库的默认分享/留言内容
+ * @param {string} displayName - 金库显示名称
+ * @param {string} depositAmount - 初始存款金额
+ * @param {string} tokenSymbol - 代币符号
+ * @param {string} txHash - 交易哈希
+ * @param {string} vaultUrl - 金库链接
+ * @returns {string}
+ */
+function generateCreateVaultDefaultText(displayName, depositAmount, tokenSymbol, txHash, vaultUrl) {
+    return `我刚在@Consensus_Vault\n<${displayName}> 金库\n创建了新的共识金库：${displayName}\n初始存款：${depositAmount} ${tokenSymbol}\n链上哈希：${txHash}`;
+}
+
+/**
+ * 显示创建金库成功弹窗（带留言和分享功能）
+ * @param {string} title
+ * @param {string} message
+ * @param {string} displayName - 金库显示名称
+ * @param {string} depositAmount - 初始存款金额
+ * @param {string} tokenSymbol - 代币符号
+ * @param {string} txHash - 交易哈希
+ * @param {string} vaultUrl - 金库链接
+ * @param {string} vaultAddress - 金库地址
+ * @param {boolean} isEasterEgg - 是否为彩蛋模式（不自动跳转）
+ */
+function showCreateSuccessModal(title, message, displayName, depositAmount, tokenSymbol, txHash, vaultUrl, vaultAddress, isEasterEgg) {
+    // 生成默认内容
+    const defaultText = generateCreateVaultDefaultText(displayName, depositAmount, tokenSymbol, txHash, vaultUrl);
+
+    const safe = (message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    const html = `
+        <p class="modal-success-message">${safe}</p>
+        <div class="modal-share-input-area">
+            <label for="modalShareInput" style="display: block; margin-bottom: 8px; font-size: 13px; color: var(--text-muted);">编辑分享内容：</label>
+            <textarea id="modalShareInput" class="modal-share-input" rows="4" maxlength="200" placeholder="编辑分享内容...">${defaultText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+            <div class="modal-share-char-count">
+                <span id="modalShareCharCount">${defaultText.length}/500</span>
+            </div>
+        </div>
+        <div class="modal-success-actions">
+            <button type="button" id="modalBtnComment" class="btn btn-primary"><i class="fas fa-comment"></i> 留言</button>
+            <button type="button" id="modalBtnShare" class="btn btn-primary"><i class="fab fa-x-twitter"></i> 分享到 X</button>
+            <button type="button" id="modalBtnView" class="btn btn-primary"><i class="fas fa-eye"></i> 查看金库</button>
+        </div>`;
+
+    let hasClickedComment = false;
+    let modalInput = null;
+
+    // 保存留言（长文案，用输入框内容）
+    const saveCommentLong = () => {
+        if (!vaultAddress || !walletAddress || hasClickedComment) return;
+        let text = (modalInput?.value || '').trim() || defaultText;
+        if (!text) return;
+        
+        // 截断到200个字符（与链上合约限制保持一致）
+        if (text.length > 200) {
+            text = text.substring(0, 200);
+            // 更新输入框显示截断后的内容
+            if (modalInput) {
+                modalInput.value = text;
+                // 更新字符计数
+                const charCount = document.querySelector('#modalShareCharCount');
+                if (charCount) {
+                    charCount.textContent = `200/200`;
+                }
+            }
+        }
+        
+        saveComment(vaultAddress, walletAddress, 'create', text, txHash);
+        hasClickedComment = true;
+    };
+
+    // 仅关闭时保存的短文案（如 "创建金库 1000 USDT"）
+    const saveCommentShortOnClose = () => {
+        if (!vaultAddress || !walletAddress || hasClickedComment) return;
+        const shortText = tokenSymbol ? `创建金库 ${depositAmount} ${tokenSymbol}` : `创建金库 ${depositAmount}`;
+        saveComment(vaultAddress, walletAddress, 'create', shortText, txHash);
+    };
+
+    showModal(title, '', {
+        htmlBody: html,
+        onRender(bodyEl, closeModal) {
+            const input = bodyEl.querySelector('#modalShareInput');
+            const charCount = bodyEl.querySelector('#modalShareCharCount');
+            const btnComment = bodyEl.querySelector('#modalBtnComment');
+            const btnShare = bodyEl.querySelector('#modalBtnShare');
+            const btnView = bodyEl.querySelector('#modalBtnView');
+
+            modalInput = input;
+
+            if (input && charCount) {
+                const updateCharCount = () => {
+                    let value = input.value || '';
+                    const n = value.length;
+                    
+                    // 如果超过200字符，截断并更新输入框
+                    if (n > 200) {
+                        value = value.substring(0, 200);
+                        input.value = value;
+                        charCount.textContent = `200/200`;
+                        charCount.style.color = 'var(--warning, #ff6b6b)';
+                    } else {
+                        charCount.textContent = `${n}/200`;
+                        // 接近限制时显示警告色
+                        if (n >= 180) {
+                            charCount.style.color = 'var(--warning, #ff6b6b)';
+                        } else {
+                            charCount.style.color = '';
+                        }
+                    }
+                };
+                
+                // 监听输入事件，实时限制长度
+                input.addEventListener('input', (e) => {
+                    if (input.value.length > 200) {
+                        input.value = input.value.substring(0, 200);
+                    }
+                    updateCharCount();
+                });
+                
+                // 监听粘贴事件，防止粘贴超长内容
+                input.addEventListener('paste', (e) => {
+                    setTimeout(() => {
+                        if (input.value.length > 200) {
+                            input.value = input.value.substring(0, 200);
+                        }
+                        updateCharCount();
+                    }, 0);
+                });
+                
+                updateCharCount();
+            }
+
+            const disableBtn = (btn) => {
+                if (!btn) return;
+                btn.disabled = true;
+                btn.classList.add('btn-disabled');
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            };
+
+            // 留言：只保存，不关弹窗；仅留言按钮变灰失效
+            if (btnComment) {
+                btnComment.addEventListener('click', () => {
+                    saveCommentLong();
+                    disableBtn(btnComment);
+                });
+                btnComment.addEventListener('touchend', (e) => { e.preventDefault(); btnComment.click(); });
+            }
+
+            // 分享：只分享，不关弹窗；文案已含金库地址，不传 url 避免重复；仅分享按钮变灰失效
+            if (btnShare) {
+                btnShare.addEventListener('click', () => {
+                    const text = (input?.value || '').trim() || defaultText;
+                    shareToTwitter(text);
+                    disableBtn(btnShare);
+                });
+                btnShare.addEventListener('touchend', (e) => { e.preventDefault(); btnShare.click(); });
+            }
+
+            // 查看金库：关闭弹窗并跳转
+            if (btnView) {
+                btnView.addEventListener('click', () => {
+                    closeModal();
+                    goToVaultDetail(vaultAddress);
+                });
+                btnView.addEventListener('touchend', (e) => { e.preventDefault(); btnView.click(); });
+            }
+        }
+    }).then(() => {
+        // 仅当用户直接关闭弹窗（未点留言）时，保存短文案如 "创建金库 1000 USDT"
+        saveCommentShortOnClose();
+        // 如果是彩蛋模式，关闭后跳转；否则已经在2秒后自动跳转了
+        if (isEasterEgg) {
+            goToVaultDetail(vaultAddress);
+        }
+    });
+
+    // 非彩蛋模式：2秒后自动跳转
+    if (!isEasterEgg) {
+        setTimeout(() => {
+            goToVaultDetail(vaultAddress);
+        }, 2000);
+    }
 }
 
 
@@ -2291,7 +2589,7 @@ function diagnoseWalletConnection() {
  */
 async function diagnosticTokenPrices() {
     console.log('=== 代币价格诊断 ===');
-    
+
     if (!allVaults || allVaults.length === 0) {
         console.warn('未加载任何金库');
         return;
@@ -2488,6 +2786,11 @@ function loadMoreVaults() {
 
     currentPage++;
 
+    // 同步卡片头部高度，确保对齐
+    setTimeout(() => {
+        syncCardHeaderHeights();
+    }, 100); // 延迟执行，确保DOM已更新
+
     // 如果还有更多金库，显示加载指示器
     if (end < filteredVaults.length) {
         if (loadingMore) loadingMore.style.display = 'flex';
@@ -2509,13 +2812,20 @@ function createVaultCard(vault) {
     const statusClass = vault.consensusReached ? 'status-unlocked' : 'status-active';
 
     // 格式化显示名称：金库名字 + 代币symbol
-    const displayTitle = vault.vaultName && vault.vaultName.trim()
+    const fullDisplayTitle = vault.vaultName && vault.vaultName.trim()
         ? `${vault.vaultName} ${vault.tokenSymbol || 'TOKEN'}`
         : (vault.tokenSymbol || 'VAULT');
 
+    // 限制显示长度（30个字符），超出部分用省略号
+    const MAX_DISPLAY_LENGTH = 30;
+    const isTruncated = fullDisplayTitle.length > MAX_DISPLAY_LENGTH;
+    const displayTitle = isTruncated
+        ? fullDisplayTitle.substring(0, MAX_DISPLAY_LENGTH) + '...'
+        : fullDisplayTitle;
+
     div.innerHTML = `
         <div class="card-header">
-            <h3>${displayTitle}</h3>
+            <h3${isTruncated ? ` title="${fullDisplayTitle}"` : ''}>${displayTitle}</h3>
             <span class="status-badge ${statusClass}">${status}</span>
         </div>
         <div class="card-body">
@@ -2617,6 +2927,51 @@ function createVaultCard(vault) {
     }
 
     return div;
+}
+
+// 同步所有卡片头部的高度，确保对齐
+function syncCardHeaderHeights() {
+    // 同步"所有金库"视图中的卡片
+    const allVaultsGrid = document.getElementById('vaultsGrid');
+    if (allVaultsGrid) {
+        const cardHeaders = allVaultsGrid.querySelectorAll('.card-header');
+        if (cardHeaders.length > 0) {
+            let maxHeight = 0;
+            // 先找到最大高度
+            cardHeaders.forEach(header => {
+                header.style.height = 'auto'; // 重置高度以测量实际高度
+                const height = header.offsetHeight;
+                if (height > maxHeight) {
+                    maxHeight = height;
+                }
+            });
+            // 设置所有头部为相同高度
+            cardHeaders.forEach(header => {
+                header.style.height = maxHeight + 'px';
+            });
+        }
+    }
+
+    // 同步"我的金库"视图中的卡片
+    const userVaultsGrid = document.getElementById('userVaultsGrid');
+    if (userVaultsGrid) {
+        const cardHeaders = userVaultsGrid.querySelectorAll('.card-header');
+        if (cardHeaders.length > 0) {
+            let maxHeight = 0;
+            // 先找到最大高度
+            cardHeaders.forEach(header => {
+                header.style.height = 'auto'; // 重置高度以测量实际高度
+                const height = header.offsetHeight;
+                if (height > maxHeight) {
+                    maxHeight = height;
+                }
+            });
+            // 设置所有头部为相同高度
+            cardHeaders.forEach(header => {
+                header.style.height = maxHeight + 'px';
+            });
+        }
+    }
 }
 
 // 搜索功能
