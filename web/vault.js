@@ -264,122 +264,9 @@ async function loadComments(vaultAddr) {
             comments = commentsData;
         }
 
-        // 查询 CommentAdded 事件，获取每条留言的交易哈希（异步，不阻塞）
-        const commentVaultAddr = CONFIG.commentVaultAddress;
-        let commentTxHashes = new Map(); // 使用 Map 存储留言的唯一标识到交易哈希的映射
-        
-        if (commentVaultAddr && commentVaultAddr !== '0x' && comments.length > 0) {
-            try {
-                // 添加超时机制，避免查询过慢
-                const queryPromise = (async () => {
-                    // 获取当前区块号
-                    const currentBlock = await provider.getBlockNumber();
-                    
-                    // 计算查询范围：从最早的留言区块到当前区块，但限制在最近50000个区块内
-                    const commentBlocks = comments.map(c => c.blockNumber.toNumber());
-                    const minBlock = Math.min(...commentBlocks);
-                    
-                    // 限制查询范围：最多查询最近50000个区块，避免 RPC 限制
-                    const MAX_BLOCK_RANGE = 50000;
-                    let queryFromBlock = Math.max(minBlock, currentBlock - MAX_BLOCK_RANGE);
-                    const queryToBlock = currentBlock;
-                    
-                    // 确保 fromBlock 不会小于 0，且不会太大
-                    if (queryFromBlock < 0) queryFromBlock = 0;
-                    if (queryFromBlock > queryToBlock) {
-                        queryFromBlock = Math.max(0, queryToBlock - MAX_BLOCK_RANGE);
-                    }
-                    
-                    // 如果查询范围太大，直接跳过查询，避免触发 RPC 限制
-                    const blockRange = queryToBlock - queryFromBlock;
-                    if (blockRange > MAX_BLOCK_RANGE) {
-                        console.warn(`[留言] 查询范围过大 (${blockRange} 个区块)，跳过事件查询以避免 RPC 限制`);
-                        return []; // 返回空数组，不进行查询
-                    }
-                    
-                    // 如果最早的留言区块太早（超过50000个区块），也跳过查询
-                    if (currentBlock - minBlock > MAX_BLOCK_RANGE) {
-                        console.warn(`[留言] 最早的留言区块太早 (${currentBlock - minBlock} 个区块前)，跳过事件查询以避免 RPC 限制`);
-                        return []; // 返回空数组，不进行查询
-                    }
-                    
-                    console.log(`[留言] 准备查询事件，范围: ${queryFromBlock} - ${queryToBlock} (${blockRange} 个区块)`);
-                    
-                    // 创建事件过滤器
-                    const eventFilter = contract.filters.CommentAdded(vaultAddr);
-                    
-                    // 查询指定范围内的事件（明确传递区块号，避免查询所有历史）
-                    // 注意：queryFilter 的第二个和第三个参数是 fromBlock 和 toBlock
-                    // 确保参数是数字类型，不是字符串
-                    const fromBlockNum = Number(queryFromBlock);
-                    const toBlockNum = Number(queryToBlock);
-                    
-                    if (isNaN(fromBlockNum) || isNaN(toBlockNum)) {
-                        throw new Error(`无效的区块号: fromBlock=${queryFromBlock}, toBlock=${queryToBlock}`);
-                    }
-                    
-                    console.log(`[留言] 执行查询，fromBlock=${fromBlockNum}, toBlock=${toBlockNum}`);
-                    
-                    const events = await contract.queryFilter(
-                        eventFilter,
-                        fromBlockNum,  // fromBlock (必须是数字)
-                        toBlockNum     // toBlock (必须是数字)
-                    );
-                    
-                    console.log(`[留言] 查询事件完成，范围: ${queryFromBlock} - ${queryToBlock}, 找到 ${events.length} 个事件`);
-                    
-                    return events;
-                })();
-                
-                // 设置5秒超时
-                const timeoutPromise = new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('查询事件超时')), 5000)
-                );
-                
-                const events = await Promise.race([queryPromise, timeoutPromise]);
-                
-                // 通过区块号、用户地址、时间戳和消息内容来精确匹配留言
-                events.forEach(event => {
-                    if (event.args && event.args.vaultAddress && 
-                        event.args.vaultAddress.toLowerCase() === vaultAddr.toLowerCase()) {
-                        const blockNum = event.blockNumber;
-                        const userAddr = event.args.user;
-                        const timestamp = event.args.timestamp.toNumber();
-                        const message = event.args.message;
-                        const txHash = event.transactionHash;
-                        
-                        // 找到匹配的留言（通过多个条件匹配确保准确性）
-                        const commentIndex = comments.findIndex(c => {
-                            const cBlockNum = c.blockNumber.toNumber();
-                            const cUser = c.user.toLowerCase();
-                            const cTimestamp = c.timestamp.toNumber();
-                            const cMessage = c.message || '';
-                            
-                            return cBlockNum === blockNum &&
-                                   cUser === userAddr.toLowerCase() &&
-                                   Math.abs(cTimestamp - timestamp) <= 1 && // 允许1秒误差
-                                   cMessage === message; // 消息内容必须完全匹配
-                        });
-                        
-                        if (commentIndex >= 0) {
-                            commentTxHashes.set(commentIndex, txHash);
-                        }
-                    }
-                });
-            } catch (eventError) {
-                // 优雅降级：查询失败不影响留言显示，只是不显示交易哈希
-                const errorMsg = eventError.message || eventError.toString();
-                if (errorMsg.includes('limit exceeded') || errorMsg.includes('timeout')) {
-                    console.warn('[留言] 查询事件受限（RPC限制或超时），将不显示留言交易哈希');
-                } else {
-                    console.warn('[留言] 查询事件失败，将不显示留言交易哈希:', errorMsg);
-                }
-                // 不抛出错误，继续执行
-            }
-        }
-
         // 转换为前端格式（最新的在前）
-        return comments.map((c, index) => {
+        // 注意：不查询事件，不显示留言本身的交易哈希（避免 RPC 限制）
+        return comments.map((c) => {
             const action = bytes32ToString(c.action);
             let relatedTxHash = ''; // 关联的操作交易哈希
             if (c.txHash && c.txHash !== ethers.constants.HashZero) {
@@ -391,9 +278,6 @@ async function loadComments(vaultAddr) {
                     relatedTxHash = '0x' + trimmed.padStart(64, '0');
                 }
             }
-            
-            // 获取留言本身的交易哈希（注意：reverse 前，index 是原始顺序）
-            const commentTxHash = commentTxHashes.get(index) || '';
 
             return {
                 timestamp: c.timestamp.toNumber() * 1000, // 转换为毫秒
@@ -401,7 +285,6 @@ async function loadComments(vaultAddr) {
                 action: action || '',
                 message: c.message || '',
                 txHash: relatedTxHash || '', // 关联的操作交易哈希
-                commentTxHash: commentTxHash, // 留言本身的交易哈希
                 blockNumber: c.blockNumber.toNumber()
             };
         }).reverse(); // 反转，最新的在前
@@ -1900,17 +1783,17 @@ async function renderComments(vaultAddr) {
         const time = c.timestamp ? new Date(c.timestamp).toLocaleString() : '—';
         const msg = (c.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
         
-        // 显示留言本身的交易哈希（优先显示）
-        const commentTxHash = c.commentTxHash || '';
         // 显示关联的操作交易哈希（如果有）
         const relatedTxHash = c.txHash || '';
         
         let txLinks = [];
-        if (commentTxHash && explorerUrl) {
-            txLinks.push(`<a href="${explorerUrl}/tx/${commentTxHash}" target="_blank" rel="noopener" class="comment-tx-link">留言哈希</a>`);
-        }
-        if (relatedTxHash && explorerUrl && relatedTxHash !== commentTxHash) {
+        // 只显示操作哈希（如果有关联操作）
+        if (relatedTxHash && explorerUrl) {
             txLinks.push(`<a href="${explorerUrl}/tx/${relatedTxHash}" target="_blank" rel="noopener" class="comment-tx-link">操作哈希</a>`);
+        }
+        // 显示区块号链接（让用户去区块浏览器查看该区块的交易）
+        if (explorerUrl && c.blockNumber) {
+            txLinks.push(`<a href="${explorerUrl}/block/${c.blockNumber}" target="_blank" rel="noopener" class="comment-tx-link" title="查看区块 ${c.blockNumber} 的所有交易">区块 #${c.blockNumber}</a>`);
         }
         const txLinksHtml = txLinks.length > 0 ? txLinks.join(' ') : '';
         
