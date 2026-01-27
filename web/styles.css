@@ -172,6 +172,7 @@ p,
     align-items: center;
     gap: 10px;
     font-weight: 700;
+    line-height: 1;
 }
 
 .logo-mark {
@@ -184,6 +185,14 @@ p,
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #111;
     box-shadow: 0 6px 24px rgba(124, 92, 255, 0.35);
+    line-height: 1;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.logo-mark::before {
+    content: '';
+    display: none;
 }
 
 .logo-text {
@@ -193,6 +202,9 @@ p,
     letter-spacing: 0.12em;
     font-weight: 900;
     text-shadow: 0 0 20px rgba(255, 122, 26, 0.5), 0 0 40px rgba(124, 92, 255, 0.3);
+    line-height: 1.2;
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .logo-badge {
