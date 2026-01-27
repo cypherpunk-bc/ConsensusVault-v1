@@ -84,17 +84,26 @@
 
 /* 小屏手机 */
 @media (max-width: 640px) {
-    /* 确保所有容器不溢出屏幕 */
+    /* 确保所有容器不溢出屏幕 - 特别针对OK钱包等特殊浏览器 */
+    html {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+        position: relative;
+    }
+
     body {
         width: 100%;
         max-width: 100vw;
         overflow-x: hidden;
+        position: relative;
     }
 
     #app {
         width: 100%;
         max-width: 100vw;
         overflow-x: hidden;
+        position: relative;
     }
 
     .container {
@@ -162,15 +171,21 @@
         gap: 6px;
         padding: 8px 12px;
         width: 100%;
+        max-width: 100vw;
         box-sizing: border-box;
+        overflow-x: hidden;
+        position: relative;
     }
 
     .nav-left {
         width: 100%;
+        max-width: 100%;
         display: flex;
         flex-direction: column;
         align-items: stretch;
         gap: 6px;
+        box-sizing: border-box;
+        overflow-x: hidden;
     }
 
     /* 排列顺序：logo -> 搜索 -> tab */
@@ -233,16 +248,21 @@
     .nav-right {
         order: 4;
         width: 100%;
+        max-width: 100%;
         display: flex;
         justify-content: space-between;
         gap: 6px;
         box-sizing: border-box;
+        overflow-x: hidden;
     }
 
     .chain-info,
     .wallet-info {
         flex: 1;
         min-width: 0;
+        max-width: 50%;
+        box-sizing: border-box;
+        overflow: hidden;
     }
 
     .controls {
@@ -259,6 +279,17 @@
         max-width: 100%;
         padding: 20px 0;
         box-sizing: border-box;
+        overflow-x: hidden;
+    }
+
+    /* 针对OK钱包的特殊修复 - 确保所有元素都不会溢出 */
+    * {
+        max-width: 100%;
+    }
+
+    img, video, iframe {
+        max-width: 100%;
+        height: auto;
     }
 
     /* 确保表单说明文字完整显示 */
