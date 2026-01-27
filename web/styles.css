@@ -560,6 +560,20 @@ p,
     letter-spacing: 0.05em;
 }
 
+.form-group small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    margin-top: 6px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
 .input-large,
 .input,
 input[type="text"],
