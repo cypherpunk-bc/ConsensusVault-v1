@@ -78,6 +78,40 @@
                                 min="0.01" step="0.01">
                             <small>创建金库时必须存入的代币数量（必填，必须 > 0）</small>
                         </div>
+                        <div id="pluginOptionsSection" class="form-group" style="display: none;">
+                            <div id="pluginSummaryLine" class="plugin-summary-line">
+                                与经典金库相同规则。<button type="button" id="pluginToggleBtn" class="btn-link">高级：选择插件</button> <span id="pluginToggleIcon">▼</span>
+                            </div>
+                            <div id="pluginExpandable" class="form-group" style="display: none; margin-top: 0.75rem;">
+                                <div id="pluginPassRatioRow" class="form-group" style="margin-bottom: 0.5rem; display: none;">
+                                    <label class="label-small">通过率（%）</label>
+                                    <input type="number" id="pluginPassRatioPct" class="input-large" placeholder="50" min="0" max="100" step="1" title="选择共识策略后可填：0%=不投票即通过（发红包等），1–100%=赞成票占比达到即达成共识，不填默认 50%">
+                                </div>
+                                <div class="plugin-row">
+                                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                                        <label class="label-small">捐赠策略</label>
+                                        <select id="pluginDonatePolicy" class="input-large">
+                                            <option value="">不选（与经典金库相同）</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                                        <label class="label-small">分红分配</label>
+                                        <select id="pluginRewardDistributor" class="input-large">
+                                            <option value="">不选（与经典金库相同）</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                                        <label class="label-small">共识策略</label>
+                                        <select id="pluginConsensusPolicy" class="input-large">
+                                            <option value="">不选（与经典金库相同）</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <small>
+                                    不选共识策略 = 与经典金库相同（通过率 50%）。<strong>选择共识策略后</strong>，可填写上面「通过率」：0%=不投票即通过（如发红包），1–100%=赞成票占比达到即达成共识。捐赠/分红插件可选。
+                                </small>
+                            </div>
+                        </div>
                         <button id="createVaultBtn" class="btn btn-primary btn-large">
                             <i class="fas fa-hammer"></i> 创建金库并存款
                         </button>
@@ -139,9 +173,9 @@
         <!-- 页脚 -->
         <footer class="footer">
             <div class="footer-links">
-                <a href="#" target="_blank"><i class="fas fa-book"></i> 文档</a>
-                <a href="#" target="_blank"><i class="fab fa-github"></i> GitHub</a>
-                <a href="#" target="_blank"><i class="fab fa-twitter"></i> Twitter</a>
+                <a href="https://github.com/cypherpunk-bc/ConsensusVault-v1" target="_blank" rel="noopener noreferrer"><i class="fas fa-book"></i> 文档</a>
+                <a href="https://github.com/cypherpunk-bc/ConsensusVault-v1" target="_blank" rel="noopener noreferrer"><i class="fab fa-github"></i> GitHub</a>
+                <a href="https://x.com/Consensus_Vault" target="_blank" rel="noopener noreferrer"><i class="fab fa-twitter"></i> Twitter</a>
             </div>
             <div class="footer-warning">
                 <i class="fas fa-exclamation-triangle"></i>
